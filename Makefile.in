@@ -1,0 +1,29 @@
+# If KERNELRELEASE is defined, we've been invoked from the
+# kernel build system and can use its language.
+ifneq ($(KERNELRELEASE),)
+
+obj-m := ipcon.o
+ipcon-objs := main.o ipcon_genl.o
+
+
+# Otherwise we were called directly from the command
+# line; invoke the kernel build system.
+else
+
+KERNELDIR ?= @ksrc@
+
+PWD := $(shell pwd)
+
+all: default
+
+default:
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
+
+install:
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules_install
+
+clean:
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
+
+distclean: clean
+endif
