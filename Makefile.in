@@ -3,7 +3,7 @@
 ifneq ($(KERNELRELEASE),)
 
 obj-m := ipcon.o
-ipcon-objs := main.o ipcon_genl.o
+ipcon-objs := main.o ipcon_genl.o ipcon_tree.o
 
 
 # Otherwise we were called directly from the command

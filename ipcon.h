@@ -6,7 +6,10 @@
 #define __IPCON_H__
 
 #define IPCON_GENL_NAME		"ipcon"
+#define IPCON_KERNEL_GROUP_NAME	"ipcon_kevent"
 #define IPCON_MAX_SRV_NAME_LEN	32
+#define IPCON_MAX_GROUP_NUM	48
+
 
 /*
  * This is the maximum length of user message
@@ -21,13 +24,14 @@
 #define IPCON_MSG_MULTICAST	2
 
 /* IPCON_ATTR_SRV_GROUP */
-#define IPCON_AUTO_GROUP	0
-#define IPCON_MAX_GROUP		2
+#define IPCON_KERNEL_GROUP	0
+#define IPCON_AUTO_GROUP	(IPCON_MAX_GROUP_NUM + 1)
+#define IPCON_NO_GROUP		(IPCON_MAX_GROUP_NUM + 2)
 
 enum {
 	IPCON_ATTR_UNSPEC,
 	IPCON_ATTR_MSG_TYPE,
-	IPCON_ATTR_SRV_PORT,
+	IPCON_ATTR_PORT,
 	IPCON_ATTR_SRV_NAME,
 	IPCON_ATTR_SRV_GROUP,
 	IPCON_ATTR_DATA,
@@ -48,5 +52,15 @@ enum {
 	IPCON_MULICAST_MSG,
 	MSG_MAX,
 };
+
+static inline int valid_ipcon_group(__u32 group)
+{
+	return (group < IPCON_MAX_GROUP_NUM - 1);
+}
+
+static inline int valid_user_ipcon_group(__u32 group)
+{
+	return (group && valid_ipcon_group(group));
+}
 
 #endif
