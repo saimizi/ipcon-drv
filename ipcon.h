@@ -5,9 +5,12 @@
 #ifndef __IPCON_H__
 #define __IPCON_H__
 
+#include <linux/genetlink.h>
+
 #define IPCON_GENL_NAME		"ipcon"
 #define IPCON_KERNEL_GROUP_NAME	"ipcon_kevent"
 #define IPCON_MAX_SRV_NAME_LEN	32
+#define IPCON_MAX_GRP_NAME_LEN	GENL_NAMSIZ
 #define IPCON_MAX_GROUP_NUM	48
 
 
@@ -50,7 +53,7 @@ enum {
 	IPCON_SRV_RESLOVE,
 	IPCON_GROUP_RESLOVE,
 	IPCON_MULICAST_MSG,
-	MSG_MAX,
+	IPCON_CMD_MAX,
 };
 
 static inline int valid_ipcon_group(__u32 group)
