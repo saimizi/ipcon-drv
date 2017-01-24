@@ -18,7 +18,8 @@
 
 #define UNUSED_GROUP_NAME	"unused"
 static struct genl_multicast_group ipcon_mcgroups[IPCON_MAX_GROUP_NUM];
-static struct ipcon_tree_node *cp_tree_root;
+static struct ipcon_tree_root cp_srvtree_root;
+static struct ipcon_tree_root cp_grptree_root;
 
 static struct genl_family ipcon_fam = {
 	.id = GENL_ID_GENERATE,
@@ -26,6 +27,7 @@ static struct genl_family ipcon_fam = {
 	.hdrsize = IPCON_HDR_SIZE,
 	.version = 1,
 	.maxattr = IPCON_ATTR_MAX,
+	.parallel_ops = false,	/* Consider to set it to true...*/
 };
 
 static const struct nla_policy ipcon_policy[NUM_IPCON_ATTR] = {
@@ -93,146 +95,101 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 	return 0;
 }
 
-#if 0
-static int ipcon_get_selfid(struct sk_buff *skb, struct genl_info *info)
-{
-	struct sk_buff *msg;
-	void *hdr;
-
-	msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
-	if (!msg)
-		return -ENOMEM;
-
-	hdr = genlmsg_put(msg, info->snd_portid, info->snd_seq,
-			&ipcon_fam, 0, IPCON_GET_SELFID);
-
-	if (!hdr)
-		return -ENOBUFS;
-
-	if (nla_put_u32(msg, IPCON_ATTR_PORT_ID, info->snd_portid))
-		genlmsg_cancel(msg, hdr);
-	else
-		genlmsg_end(msg, hdr);
-
-	return genlmsg_reply(msg, info);
-}
-#endif
-
 static int ipcon_srv_reg(struct sk_buff *skb, struct genl_info *info)
 {
 	int ret = 0;
 	char name[IPCON_MAX_SRV_NAME_LEN];
-	struct sk_buff *msg = NULL;
-	void *hdr = NULL;
 	__u32 port;
 	__u32 msg_type;
-	__u32 group = IPCON_NO_GROUP;
 	struct ipcon_tree_node *nd = NULL;
 
 	ipcon_info("ipcon_srv_reg() enter.\n");
 	do {
 
-		if (!info || !info->attrs[IPCON_ATTR_MSG_TYPE] ||
-			!info->attrs[IPCON_ATTR_PORT] ||
-			!info->attrs[IPCON_ATTR_SRV_NAME] ||
-			!info->attrs[IPCON_ATTR_SRV_GROUP]) {
+		if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
+			!info->attrs[IPCON_ATTR_SRV_NAME]) {
 			ret = -EINVAL;
 			break;
 		}
 
-		ret = nlmsg_validate(info->nlhdr,
-				IPCON_HDR_SIZE,
-				IPCON_ATTR_MAX,
-				ipcon_policy);
-		if (ret < 0) {
-			ipcon_err("%s : wrong message.\n", __func__);
-			break;
-		}
 		msg_type = nla_get_u32(info->attrs[IPCON_ATTR_MSG_TYPE]);
-		port = nla_get_u32(info->attrs[IPCON_ATTR_PORT]);
-		nla_strlcpy(name, info->attrs[IPCON_ATTR_SRV_NAME],
-			IPCON_MAX_SRV_NAME_LEN);
-		group = nla_get_u32(info->attrs[IPCON_ATTR_SRV_GROUP]);
-
-		ret = ipcon_alloc_group(group, name);
-		if (ret < 0) {
-			ipcon_err("failed to alloc group (%d).\n", ret);
+		if (msg_type != IPCON_MSG_UNICAST) {
+			ret = -EINVAL;
 			break;
 		}
-		group = (__u32)ret;
 
+		port = info->snd_portid;
+		nla_strlcpy(name, info->attrs[IPCON_ATTR_SRV_NAME],
+				IPCON_MAX_SRV_NAME_LEN);
 
-		nd = cp_alloc_node(port, name, group);
+		nd = cp_alloc_srv_node(port, name);
 		if (!nd) {
 			ret = -ENOMEM;
 			break;
 		}
 
-		ret = cp_insert(&cp_tree_root, nd);
+		ret = cp_insert(&cp_srvtree_root, nd);
 		if (ret < 0)
 			break;
 
-		ipcon_info("Msg type: %lu\n", (unsigned long) msg_type);
-		ipcon_info("Srv port: %lu\n", (unsigned long) port);
-		ipcon_info("Srv name: %s\n", name);
-		ipcon_info("Srv group: %lu\n", (unsigned long) group);
+	} while (0);
 
-		msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
-		if (!msg) {
-			ret = -ENOMEM;
+	if (ret < 0)
+		cp_free_node(nd);
+
+	return ret;
+}
+
+static int ipcon_srv_unreg(struct sk_buff *skb, struct genl_info *info)
+{
+	int ret = 0;
+	char name[IPCON_MAX_SRV_NAME_LEN];
+	__u32 port;
+	__u32 msg_type;
+	struct ipcon_tree_node *nd = NULL;
+
+	ipcon_info("ipcon_srv_unreg() enter.\n");
+	do {
+
+		if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
+			!info->attrs[IPCON_ATTR_SRV_NAME]) {
+			ret = -EINVAL;
 			break;
 		}
 
-		hdr = genlmsg_put(msg, info->snd_portid, info->snd_seq,
-				&ipcon_fam, 0, IPCON_SRV_REG);
-		if (!hdr) {
-			ret = -ENOBUFS;
+		msg_type = nla_get_u32(info->attrs[IPCON_ATTR_MSG_TYPE]);
+		if (msg_type != IPCON_MSG_UNICAST) {
+			ret = -EINVAL;
 			break;
 		}
 
-		ret = nla_put_u32(msg, IPCON_ATTR_MSG_TYPE, IPCON_MSG_UNICAST);
-		if (ret < 0) {
-			genlmsg_cancel(msg, hdr);
+		port = info->snd_portid;
+		nla_strlcpy(name, info->attrs[IPCON_ATTR_SRV_NAME],
+				IPCON_MAX_SRV_NAME_LEN);
+
+		nd = cp_detach_node(&cp_srvtree_root, name);
+		if (!nd) {
+			ret = -ENOENT;
 			break;
 		}
 
-		ret = nla_put_u32(msg, IPCON_ATTR_PORT, port);
-		if (ret < 0) {
-			genlmsg_cancel(msg, hdr);
-			break;
-		}
-
-		ret = nla_put_string(msg, IPCON_ATTR_SRV_NAME, name);
-		if (ret < 0) {
-			genlmsg_cancel(msg, hdr);
-			break;
-		}
-
-		ret = nla_put_u32(msg, IPCON_ATTR_SRV_GROUP, group);
-		if (ret < 0) {
-			genlmsg_cancel(msg, hdr);
-			break;
-		}
-
-		genlmsg_end(msg, hdr);
+		cp_free_node(nd);
 
 	} while (0);
 
-	if (ret < 0) {
-		kfree_skb(msg);
-		ipcon_free_group(group);
-		cp_free_node(nd);
-		return ret;
-	}
-
-
-	return genlmsg_reply(msg, info);
+	return ret;
 }
 
 static const struct genl_ops ipcon_ops[] = {
 	{
 		.cmd = IPCON_SRV_REG,
 		.doit = ipcon_srv_reg,
+		.policy = ipcon_policy,
+		/*.flags = GENL_ADMIN_PERM,*/
+	},
+	{
+		.cmd = IPCON_SRV_UNREG,
+		.doit = ipcon_srv_unreg,
 		.policy = ipcon_policy,
 		/*.flags = GENL_ADMIN_PERM,*/
 	},
@@ -247,6 +204,9 @@ int ipcon_genl_init(void)
 {
 	int ret = 0;
 	int i = 0;
+
+	ipcon_init_tree(&cp_srvtree_root);
+	ipcon_init_tree(&cp_grptree_root);
 
 	for (i = 0; i < IPCON_MAX_GROUP_NUM; i++) {
 		if (i)
