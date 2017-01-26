@@ -107,6 +107,7 @@ static int ipcon_srv_reg(struct sk_buff *skb, struct genl_info *info)
 	do {
 
 		if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
+			!info->attrs[IPCON_ATTR_PORT] ||
 			!info->attrs[IPCON_ATTR_SRV_NAME]) {
 			ret = -EINVAL;
 			break;
@@ -118,19 +119,20 @@ static int ipcon_srv_reg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
-		port = info->snd_portid;
+		port = nla_get_u32(info->attrs[IPCON_ATTR_PORT]);
 		nla_strlcpy(name, info->attrs[IPCON_ATTR_SRV_NAME],
 				IPCON_MAX_SRV_NAME_LEN);
 
-		nd = cp_alloc_srv_node(port, name);
+
+		nd = cp_alloc_srv_node(port, info->snd_portid, name);
 		if (!nd) {
 			ret = -ENOMEM;
 			break;
 		}
 
+		ipcon_wrlock_tree(&cp_srvtree_root);
 		ret = cp_insert(&cp_srvtree_root, nd);
-		if (ret < 0)
-			break;
+		ipcon_wrunlock_tree(&cp_srvtree_root);
 
 	} while (0);
 
@@ -144,7 +146,7 @@ static int ipcon_srv_unreg(struct sk_buff *skb, struct genl_info *info)
 {
 	int ret = 0;
 	char name[IPCON_MAX_SRV_NAME_LEN];
-	__u32 port;
+	__u32 ctrl_port;
 	__u32 msg_type;
 	struct ipcon_tree_node *nd = NULL;
 
@@ -163,17 +165,28 @@ static int ipcon_srv_unreg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
-		port = info->snd_portid;
+		ctrl_port = info->snd_portid;
 		nla_strlcpy(name, info->attrs[IPCON_ATTR_SRV_NAME],
 				IPCON_MAX_SRV_NAME_LEN);
 
-		nd = cp_detach_node(&cp_srvtree_root, name);
+		ipcon_wrlock_tree(&cp_srvtree_root);
+		nd = cp_lookup(&cp_srvtree_root, name);
 		if (!nd) {
 			ret = -ENOENT;
+			ipcon_wrunlock_tree(&cp_srvtree_root);
 			break;
 		}
 
+		/* Only the port who registered service can unregister it */
+		if (nd->ctrl_port != ctrl_port) {
+			ret = -EPERM;
+			ipcon_wrunlock_tree(&cp_srvtree_root);
+			break;
+		}
+
+		cp_detach_node(&cp_srvtree_root, nd);
 		cp_free_node(nd);
+		ipcon_wrunlock_tree(&cp_srvtree_root);
 
 	} while (0);
 
@@ -209,7 +222,9 @@ static int ipcon_srv_reslove(struct sk_buff *skb, struct genl_info *info)
 		nla_strlcpy(name, info->attrs[IPCON_ATTR_SRV_NAME],
 				IPCON_MAX_SRV_NAME_LEN);
 
+		ipcon_rdlock_tree(&cp_srvtree_root);
 		nd = cp_lookup(&cp_srvtree_root, name);
+		ipcon_rdunlock_tree(&cp_srvtree_root);
 
 		msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
 		if (!msg) {

@@ -48,6 +48,7 @@ struct ipcon_tree_node {
 	struct ipcon_tree_node *left;
 	struct ipcon_tree_node *right;
 	__u32 port;
+	__u32 ctrl_port;
 #if IPCON_MAX_SRV_NAME_LEN > IPCON_MAX_GRP_NAME_LEN
 	char name[IPCON_MAX_SRV_NAME_LEN];
 #else
@@ -77,11 +78,11 @@ static inline int cp_valid_node(struct ipcon_tree_node *nd)
 }
 
 int cp_comp(struct ipcon_tree_node *n1, struct ipcon_tree_node *n2);
-struct ipcon_tree_node *cp_alloc_srv_node(__u32 port, char *name);
+struct ipcon_tree_node *cp_alloc_srv_node(__u32 port,
+				__u32 ctrl_port, char *name);
 struct ipcon_tree_node *cp_alloc_grp_node(__u32 port, char *name, __u32 group);
 void cp_free_node(struct ipcon_tree_node *nd);
-struct ipcon_tree_node *cp_detach_node(struct ipcon_tree_root *root,
-		char *name);
+int cp_detach_node(struct ipcon_tree_root *root, struct ipcon_tree_node *np);
 struct ipcon_tree_node *cp_lookup(struct ipcon_tree_root *root, char *name);
 int cp_insert(struct ipcon_tree_root *root, struct ipcon_tree_node *node);
 int cp_walk_tree(struct ipcon_tree_node *root,
