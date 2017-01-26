@@ -70,7 +70,7 @@ int cp_detach_node(struct ipcon_tree_root *root, struct ipcon_tree_node *np)
 	do {
 		nl = np->parent;
 
-		if (!nl || (nl == np)) {
+		if (!nl || ((nl == np) && (nl != root->root))) {
 			ret = -EINVAL;
 			break;
 		}

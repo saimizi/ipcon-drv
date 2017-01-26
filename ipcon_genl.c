@@ -35,7 +35,7 @@ static const struct nla_policy ipcon_policy[NUM_IPCON_ATTR] = {
 	[IPCON_ATTR_PORT] = {.type = NLA_U32},
 	[IPCON_ATTR_SRV_NAME] = {.type = NLA_NUL_STRING,
 				.len = IPCON_MAX_SRV_NAME_LEN - 1 },
-	[IPCON_ATTR_SRV_GROUP] = {.type = NLA_U32},
+	[IPCON_ATTR_GROUP] = {.type = NLA_U32},
 	[IPCON_ATTR_DATA] = {.type = NLA_BINARY, .len = IPCON_MAX_MSG_LEN},
 };
 
@@ -103,7 +103,8 @@ static int ipcon_srv_reg(struct sk_buff *skb, struct genl_info *info)
 	__u32 msg_type;
 	struct ipcon_tree_node *nd = NULL;
 
-	ipcon_info("ipcon_srv_reg() enter.\n");
+	ipcon_dbg("ipcon_srv_reg() enter.\n");
+
 	do {
 
 		if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
@@ -139,6 +140,7 @@ static int ipcon_srv_reg(struct sk_buff *skb, struct genl_info *info)
 	if (ret < 0)
 		cp_free_node(nd);
 
+	ipcon_dbg("ipcon_srv_reg() exit (%d).\n", ret);
 	return ret;
 }
 
@@ -150,7 +152,7 @@ static int ipcon_srv_unreg(struct sk_buff *skb, struct genl_info *info)
 	__u32 msg_type;
 	struct ipcon_tree_node *nd = NULL;
 
-	ipcon_info("ipcon_srv_unreg() enter.\n");
+	ipcon_dbg("ipcon_srv_unreg() enter.\n");
 	do {
 
 		if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
@@ -184,12 +186,13 @@ static int ipcon_srv_unreg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
-		cp_detach_node(&cp_srvtree_root, nd);
+		ret = cp_detach_node(&cp_srvtree_root, nd);
 		cp_free_node(nd);
 		ipcon_wrunlock_tree(&cp_srvtree_root);
 
 	} while (0);
 
+	ipcon_dbg("ipcon_srv_unreg() exit (%d).\n", ret);
 	return ret;
 }
 
