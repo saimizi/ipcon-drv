@@ -180,6 +180,78 @@ static int ipcon_srv_unreg(struct sk_buff *skb, struct genl_info *info)
 	return ret;
 }
 
+static int ipcon_srv_reslove(struct sk_buff *skb, struct genl_info *info)
+{
+	int ret = 0;
+	char name[IPCON_MAX_SRV_NAME_LEN];
+	__u32 port;
+	__u32 msg_type;
+	struct ipcon_tree_node *nd = NULL;
+	void *hdr;
+
+	ipcon_info("ipcon_srv_reslove() enter.\n");
+	do {
+		struct sk_buff *msg;
+
+		if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
+			!info->attrs[IPCON_ATTR_SRV_NAME]) {
+			ret = -EINVAL;
+			break;
+		}
+
+		msg_type = nla_get_u32(info->attrs[IPCON_ATTR_MSG_TYPE]);
+		if (msg_type != IPCON_MSG_UNICAST) {
+			ret = -EINVAL;
+			break;
+		}
+
+		port = info->snd_portid;
+		nla_strlcpy(name, info->attrs[IPCON_ATTR_SRV_NAME],
+				IPCON_MAX_SRV_NAME_LEN);
+
+		nd = cp_lookup(&cp_srvtree_root, name);
+
+		msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
+		if (!msg) {
+			ret = -ENOMEM;
+			break;
+		}
+
+		hdr = genlmsg_put(msg,
+				info->snd_portid,
+				info->snd_seq,
+				&ipcon_fam,
+				0,
+				IPCON_SRV_RESLOVE);
+
+		if (!hdr) {
+			nlmsg_free(msg);
+			ret = -ENOBUFS;
+			break;
+		}
+
+		nla_put_u32(msg, IPCON_ATTR_MSG_TYPE, IPCON_MSG_UNICAST);
+		if (nd) {
+			nla_put_u32(msg, IPCON_ATTR_PORT, nd->port);
+			ipcon_dbg("%s: found %s@%lu.\n",
+					__func__,
+					name,
+					(unsigned long)nd->port);
+		} else {
+			ipcon_dbg("%s: service %s not found.\n",
+					__func__,
+					name);
+		}
+
+		genlmsg_end(msg, hdr);
+
+		ret = genlmsg_reply(msg, info);
+
+	} while (0);
+
+	return ret;
+}
+
 static const struct genl_ops ipcon_ops[] = {
 	{
 		.cmd = IPCON_SRV_REG,
@@ -190,6 +262,12 @@ static const struct genl_ops ipcon_ops[] = {
 	{
 		.cmd = IPCON_SRV_UNREG,
 		.doit = ipcon_srv_unreg,
+		.policy = ipcon_policy,
+		/*.flags = GENL_ADMIN_PERM,*/
+	},
+	{
+		.cmd = IPCON_SRV_RESLOVE,
+		.doit = ipcon_srv_reslove,
 		.policy = ipcon_policy,
 		/*.flags = GENL_ADMIN_PERM,*/
 	},
