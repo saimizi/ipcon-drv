@@ -11,7 +11,7 @@
 #define IPCON_KERNEL_GROUP_NAME	"ipcon_kevent"
 #define IPCON_MAX_SRV_NAME_LEN	32
 #define IPCON_MAX_GRP_NAME_LEN	GENL_NAMSIZ
-#define IPCON_MAX_GROUP_NUM	48
+#define IPCON_MAX_GROUP_NUM	128
 
 
 /*
@@ -37,6 +37,7 @@ enum {
 	IPCON_ATTR_PORT,
 	IPCON_ATTR_SRV_NAME,
 	IPCON_ATTR_GROUP,
+	IPCON_ATTR_GRP_NAME,
 	IPCON_ATTR_DATA,
 
 	/* Add attr here */
@@ -51,9 +52,9 @@ enum {
 	IPCON_SRV_REG,
 	IPCON_SRV_UNREG,
 	IPCON_SRV_RESLOVE,
-	IPCON_GROUP_REG,
-	IPCON_GROUP_UNREG,
-	IPCON_GROUP_RESLOVE,
+	IPCON_GRP_REG,
+	IPCON_GRP_UNREG,
+	IPCON_GRP_RESLOVE,
 	IPCON_MULICAST_MSG,
 	IPCON_USR_MSG,
 	IPCON_CMD_MAX,
@@ -68,5 +69,27 @@ static inline int valid_user_ipcon_group(__u32 group)
 {
 	return (group && valid_ipcon_group(group));
 }
+
+enum ipcon_kevent_type {
+	IPCON_EVENT_SRV_ADD,
+	IPCON_EVENT_SRV_REMOVE,
+	IPCON_EVENT_GRP_ADD,
+	IPCON_EVENT_GRP_REMOVE,
+	IPCON_EVENT_PEER_REMOVE,
+};
+
+struct ipcon_kevent {
+	enum ipcon_kevent_type type;
+	union {
+		struct {
+			char name[IPCON_MAX_SRV_NAME_LEN];
+			__u32 portid;
+		} srv;
+		struct {
+			char name[IPCON_MAX_GRP_NAME_LEN];
+			__u32 groupid;
+		} grp;
+	};
+};
 
 #endif

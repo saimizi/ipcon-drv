@@ -63,15 +63,41 @@ static inline int cp_valid_node(struct ipcon_tree_node *nd)
 	if (!nd)
 		return 0;
 
+	if (strlen(nd->name) == 0)
+		return 0;
+
+	return 1;
+}
+
+static inline int cp_valid_srv_node(struct ipcon_tree_node *nd)
+{
+	if (!cp_valid_node(nd))
+		return 0;
+
 	if (!nd->port)
 		return 0;
 
-	if (!valid_user_ipcon_group(nd->group)
-		&& (nd->group != IPCON_NO_GROUP))
+	if (nd->group != IPCON_NO_GROUP)
 		return 0;
 
-	if (strlen(nd->name) == 0 ||
-		(strlen(nd->name) > IPCON_MAX_SRV_NAME_LEN - 1))
+	if (strlen(nd->name) > (IPCON_MAX_SRV_NAME_LEN - 1))
+		return 0;
+
+	return 1;
+}
+
+static inline int cp_valid_grp_node(struct ipcon_tree_node *nd)
+{
+	if (!cp_valid_node(nd))
+		return 0;
+
+	if (!nd->ctrl_port)
+		return 0;
+
+	if (!valid_user_ipcon_group(nd->group))
+		return 0;
+
+	if (strlen(nd->name) > (IPCON_MAX_GRP_NAME_LEN - 1))
 		return 0;
 
 	return 1;
