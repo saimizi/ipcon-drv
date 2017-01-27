@@ -15,7 +15,7 @@ struct ipcon_tree_node *cp_alloc_srv_node(__u32 port, __u32 ctrl_port,
 		(strlen(name) > IPCON_MAX_SRV_NAME_LEN))
 		return NULL;
 
-	newnd = kmalloc(sizeof(struct ipcon_tree_node), GFP_KERNEL);
+	newnd = kmalloc(sizeof(struct ipcon_tree_node), GFP_ATOMIC);
 	if (!newnd)
 		return NULL;
 
@@ -41,7 +41,7 @@ struct ipcon_tree_node *cp_alloc_grp_node(__u32 ctrl_port,
 		(strlen(name) > IPCON_MAX_GRP_NAME_LEN))
 		return NULL;
 
-	newnd = kmalloc(sizeof(struct ipcon_tree_node), GFP_KERNEL);
+	newnd = kmalloc(sizeof(struct ipcon_tree_node), GFP_ATOMIC);
 	if (!newnd)
 		return NULL;
 
@@ -116,6 +116,9 @@ int cp_detach_node(struct ipcon_tree_root *root, struct ipcon_tree_node *np)
 		np->parent = np->right = np->left = NULL;
 
 	} while (0);
+
+	if (!ret)
+		root->count--;
 
 	return ret;
 }
@@ -215,6 +218,9 @@ int cp_insert(struct ipcon_tree_root *root, struct ipcon_tree_node *node)
 			}
 		}
 	}
+
+	if (!ret)
+		root->count++;
 
 	return ret;
 }

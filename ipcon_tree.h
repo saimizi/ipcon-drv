@@ -12,6 +12,9 @@
 
 struct ipcon_tree_root {
 	struct ipcon_tree_node *root;
+	__u32 count;
+	/* Only used by group tree */
+	unsigned long group_bitmap[BITS_TO_LONGS(IPCON_MAX_GROUP_NUM)];
 	rwlock_t lock;
 };
 
@@ -37,7 +40,14 @@ static inline void ipcon_wrunlock_tree(struct ipcon_tree_root *itr)
 
 static inline void ipcon_init_tree(struct ipcon_tree_root *itr)
 {
+	int i = 0;
+
 	rwlock_init(&itr->lock);
+
+	for (i = 0; i < BITS_TO_LONGS(IPCON_MAX_GROUP_NUM); i++)
+		itr->group_bitmap[i] = 0;
+
+	itr->count = 0;
 	itr->root = NULL;
 };
 
