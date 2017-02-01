@@ -39,6 +39,7 @@ enum {
 	IPCON_ATTR_GROUP,
 	IPCON_ATTR_GRP_NAME,
 	IPCON_ATTR_DATA,
+	IPCON_ATTR_FLAG,
 
 	/* Add attr here */
 

@@ -24,6 +24,7 @@ struct ipcon_tree_node *cp_alloc_srv_node(__u32 port, __u32 ctrl_port,
 	newnd->ctrl_port = ctrl_port;
 	newnd->group = IPCON_NO_GROUP;
 	strcpy(newnd->name, name);
+	newnd->last_grp_msg = NULL;
 
 	return newnd;
 }
@@ -34,11 +35,7 @@ struct ipcon_tree_node *cp_alloc_grp_node(__u32 ctrl_port,
 	struct ipcon_tree_node *newnd;
 
 	if (!name || !strlen(name) ||
-		!valid_user_ipcon_group(group))
-		return NULL;
-
-	if (!valid_user_ipcon_group(group) ||
-		(strlen(name) > IPCON_MAX_GRP_NAME_LEN))
+		!valid_ipcon_group(group))
 		return NULL;
 
 	newnd = kmalloc(sizeof(struct ipcon_tree_node), GFP_ATOMIC);
@@ -49,15 +46,21 @@ struct ipcon_tree_node *cp_alloc_grp_node(__u32 ctrl_port,
 	newnd->ctrl_port = ctrl_port;
 	strcpy(newnd->name, name);
 	newnd->group = group;
+	newnd->last_grp_msg = NULL;
 
 	return newnd;
 }
 
 void cp_free_node(struct ipcon_tree_node *nd)
 {
+	/* kfree_skb can deal with NULL */
+	kfree_skb(nd->last_grp_msg);
 	kfree(nd);
 }
 
+/*
+ * This function __requires__ caller to assure np is a node of the root tree.
+ */
 int cp_detach_node(struct ipcon_tree_root *root, struct ipcon_tree_node *np)
 {
 	int ret = 0;
@@ -66,22 +69,6 @@ int cp_detach_node(struct ipcon_tree_root *root, struct ipcon_tree_node *np)
 
 	if (!root || !np || !np->parent || !root->root)
 		return -EINVAL;
-
-	do {
-		nl = np->parent;
-
-		if (!nl || ((nl == np) && (nl != root->root))) {
-			ret = -EINVAL;
-			break;
-		}
-
-		if (nl == root->root)
-			break;
-
-	} while (nl);
-
-	if (ret < 0)
-		return ret;
 
 	do {
 		if (np->left && np->right) {
@@ -100,6 +87,10 @@ int cp_detach_node(struct ipcon_tree_root *root, struct ipcon_tree_node *np)
 		}
 
 		if (np->parent == np) {
+			if (np->parent != root->root) {
+				ret = -EINVAL;
+				break;
+			}
 			root->root = nr;
 			if (nr)
 				nr->parent = root->root;

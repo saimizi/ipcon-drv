@@ -18,22 +18,27 @@ struct ipcon_tree_root {
 	rwlock_t lock;
 };
 
-static inline void ipcon_rdlock_tree(struct ipcon_tree_root *itr)
+static inline void ipcon_rd_lock_tree(struct ipcon_tree_root *itr)
 {
 	read_lock(&itr->lock);
 };
 
-static inline void ipcon_rdunlock_tree(struct ipcon_tree_root *itr)
+static inline void ipcon_rd_unlock_tree(struct ipcon_tree_root *itr)
 {
 	read_unlock(&itr->lock);
 };
 
-static inline void ipcon_wrlock_tree(struct ipcon_tree_root *itr)
+static inline void ipcon_wr_lock_tree(struct ipcon_tree_root *itr)
 {
 	write_lock(&itr->lock);
 };
 
-static inline void ipcon_wrunlock_tree(struct ipcon_tree_root *itr)
+static inline int ipcon_wr_trylock_tree(struct ipcon_tree_root *itr)
+{
+	return write_trylock(&itr->lock);
+};
+
+static inline void ipcon_wr_unlock_tree(struct ipcon_tree_root *itr)
 {
 	write_unlock(&itr->lock);
 };
@@ -64,6 +69,7 @@ struct ipcon_tree_node {
 #else
 	char name[IPCON_MAX_GRP_NAME_LEN];
 #endif
+	struct sk_buff *last_grp_msg;
 	__u32 group;
 	__u32 auth_key;
 };
