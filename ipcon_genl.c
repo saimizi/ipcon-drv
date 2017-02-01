@@ -66,8 +66,8 @@ static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags)
 			break;
 		}
 
-		ret = nla_put_u32(msg, IPCON_ATTR_GROUP,
-				IPCON_KERNEL_GROUP + ipcon_fam.mcgrp_offset);
+		ret = nla_put_string(msg, IPCON_ATTR_GRP_NAME,
+				IPCON_KERNEL_GROUP_NAME);
 		if (ret < 0) {
 			genlmsg_cancel(msg, hdr);
 			break;
@@ -644,7 +644,8 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 				break;
 			}
 
-			ret = nla_put_u32(msg, IPCON_ATTR_GROUP, tgt_group);
+			ret = nla_put_string(msg, IPCON_ATTR_GRP_NAME,
+					nd->name);
 			if (ret < 0) {
 				genlmsg_cancel(msg, hdr);
 				break;
