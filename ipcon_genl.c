@@ -44,23 +44,30 @@ static const struct nla_policy ipcon_policy[NUM_IPCON_ATTR] = {
 static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags)
 {
 	int ret = 0;
-	struct sk_buff *msg;
-	void *hdr;
+	struct sk_buff *msg = NULL;
+	void *hdr = NULL;
 
 	if (!ik)
 		return;
 
 	do {
-		msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
+		msg = nlmsg_new(NLMSG_DEFAULT_SIZE, flags);
 		if (!msg)
 			break;
 
-		hdr = genlmsg_put(msg, 0, 0, &ipcon_fam, 0, IPCON_MULICAST_MSG);
+		hdr = genlmsg_put(msg, 0, 0, &ipcon_fam, 0, IPCON_USR_MSG);
 		if (!hdr)
 			break;
 
 		ret = nla_put_u32(msg, IPCON_ATTR_MSG_TYPE,
 				IPCON_MSG_MULTICAST);
+		if (ret < 0) {
+			genlmsg_cancel(msg, hdr);
+			break;
+		}
+
+		ret = nla_put_u32(msg, IPCON_ATTR_GROUP,
+				IPCON_KERNEL_GROUP + ipcon_fam.mcgrp_offset);
 		if (ret < 0) {
 			genlmsg_cancel(msg, hdr);
 			break;
@@ -78,7 +85,9 @@ static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags)
 
 	} while (0);
 
-	nlmsg_free(msg);
+	/* In case of success, genlmsg_multicast() will free msg */
+	if (ret < 0)
+		nlmsg_free(msg);
 }
 
 /*
