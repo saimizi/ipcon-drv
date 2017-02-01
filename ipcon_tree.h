@@ -127,6 +127,6 @@ int cp_walk_tree(struct ipcon_tree_node *root,
 void cp_free_tree(struct ipcon_tree_root *root);
 void cp_print_tree(struct ipcon_tree_root *root);
 struct ipcon_tree_node *cp_lookup_by_port(struct ipcon_tree_root *root,
-		u32 port);
+		__u32 port);
 
 #endif

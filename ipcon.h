@@ -89,6 +89,9 @@ struct ipcon_kevent {
 			char name[IPCON_MAX_GRP_NAME_LEN];
 			__u32 groupid;
 		} grp;
+		struct {
+			__u32 portid;
+		} peer;
 	};
 };
 

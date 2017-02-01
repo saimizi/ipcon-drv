@@ -324,13 +324,16 @@ static int search_nd_by_port(struct ipcon_tree_node *nd, void *para)
 	if (nd->port == nsi->port) {
 		nsi->nd = nd;
 		ret = 1;
+	} else if (nd->ctrl_port == nsi->port) {
+		nsi->nd = nd;
+		ret = 1;
 	}
 
 	return ret;
 }
 
 struct ipcon_tree_node *cp_lookup_by_port(struct ipcon_tree_root *root,
-					u32 port)
+					__u32 port)
 {
 	struct nd_search_info result;
 	int ret = 0;

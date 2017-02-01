@@ -97,6 +97,74 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 				  unsigned long state,
 				  void *_notify)
 {
+	struct netlink_notify *n = _notify;
+	struct ipcon_tree_node *nd = NULL;
+	struct ipcon_kevent ik;
+
+	if (n->protocol != NETLINK_GENERIC)
+		return NOTIFY_DONE;
+
+	if (state != NETLINK_URELEASE)
+		return NOTIFY_DONE;
+
+	ipcon_dbg("Release protocol:%d portid:%u\n", n->protocol,
+			((__u32)n->portid));
+
+	/*
+	 * Release related service and inform user space
+	 * 1 peer is corresponding to just 1 service.
+	 */
+	ipcon_wrlock_tree(&cp_srvtree_root);
+
+	nd = cp_lookup_by_port(&cp_srvtree_root, (__u32)n->portid);
+	if (nd) {
+		cp_detach_node(&cp_srvtree_root, nd);
+
+		ik.type = IPCON_EVENT_SRV_REMOVE;
+		strcpy(ik.srv.name, nd->name);
+		ik.srv.portid = nd->port;
+		ipcon_send_kevent(&ik, GFP_ATOMIC);
+
+		ipcon_dbg("Release service:%s portid:%lu\n",
+				nd->name,
+				(unsigned long)nd->port);
+		cp_free_node(nd);
+	}
+
+	ipcon_wrunlock_tree(&cp_srvtree_root);
+
+	/*
+	 * Release related group and inform user space
+	 * 1 peer may be corresponding to multi groups.
+	 */
+	ipcon_wrlock_tree(&cp_grptree_root);
+
+	do {
+		nd = cp_lookup_by_port(&cp_grptree_root, n->portid);
+		if (nd) {
+			cp_detach_node(&cp_grptree_root, nd);
+
+			ik.type = IPCON_EVENT_GRP_REMOVE;
+			strcpy(ik.grp.name, nd->name);
+			ik.grp.groupid = nd->group;
+			ipcon_send_kevent(&ik, GFP_ATOMIC);
+
+			ipcon_dbg("Release group:%s groupid:%lu\n",
+				nd->name,
+				(unsigned long)nd->group);
+			cp_free_node(nd);
+		}
+	} while (nd);
+
+	ipcon_wrunlock_tree(&cp_grptree_root);
+
+	/* Inform user space of peer remove */
+	ik.type = IPCON_EVENT_PEER_REMOVE;
+	ik.peer.portid = n->portid;
+	ipcon_send_kevent(&ik, GFP_ATOMIC);
+	ipcon_dbg("Release peer portid:%u\n", (__u32)n->portid);
+
+
 	return 0;
 }
 
