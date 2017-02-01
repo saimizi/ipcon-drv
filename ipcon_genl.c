@@ -146,6 +146,7 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 	nd = cp_lookup_by_port(&cp_srvtree_root, (__u32)n->portid);
 	if (nd) {
 		cp_detach_node(&cp_srvtree_root, nd);
+		ipcon_wr_unlock_tree(&cp_srvtree_root);
 
 		ik.type = IPCON_EVENT_SRV_REMOVE;
 		strcpy(ik.srv.name, nd->name);
@@ -156,9 +157,9 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 				nd->name,
 				(unsigned long)nd->port);
 		cp_free_node(nd);
+	} else {
+		ipcon_wr_unlock_tree(&cp_srvtree_root);
 	}
-
-	ipcon_wr_unlock_tree(&cp_srvtree_root);
 
 	/*
 	 * Release related group and inform user space
@@ -233,12 +234,14 @@ static int ipcon_srv_reg(struct sk_buff *skb, struct genl_info *info)
 		}
 
 		ret = cp_insert(&cp_srvtree_root, nd);
+		if (ret < 0)
+			cp_free_node(nd);
 
 	} while (0);
 
-	if (ret < 0) {
-		cp_free_node(nd);
-	} else {
+	ipcon_wr_unlock_tree(&cp_srvtree_root);
+
+	if (!ret) {
 		struct ipcon_kevent ik;
 
 		ik.type = IPCON_EVENT_SRV_ADD;
@@ -248,7 +251,6 @@ static int ipcon_srv_reg(struct sk_buff *skb, struct genl_info *info)
 		ipcon_send_kevent(&ik, GFP_ATOMIC, 1);
 	}
 
-	ipcon_wr_unlock_tree(&cp_srvtree_root);
 
 	ipcon_dbg("ipcon_srv_reg() exit (%d).\n", ret);
 	return ret;
@@ -298,6 +300,7 @@ static int ipcon_srv_unreg(struct sk_buff *skb, struct genl_info *info)
 		}
 
 		cp_detach_node(&cp_srvtree_root, nd);
+		ipcon_wr_unlock_tree(&cp_srvtree_root);
 
 		ik.type = IPCON_EVENT_SRV_REMOVE;
 		strcpy(ik.srv.name, name);
@@ -306,7 +309,6 @@ static int ipcon_srv_unreg(struct sk_buff *skb, struct genl_info *info)
 
 		cp_free_node(nd);
 
-		ipcon_wr_unlock_tree(&cp_srvtree_root);
 
 	} while (0);
 
