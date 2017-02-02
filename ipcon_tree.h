@@ -72,6 +72,9 @@ struct ipcon_tree_node {
 	struct sk_buff *last_grp_msg;
 	__u32 group;
 	__u32 auth_key;
+#ifdef CONFIG_DEBUG_FS
+	void *priv;
+#endif
 };
 
 static inline int cp_valid_node(struct ipcon_tree_node *nd)

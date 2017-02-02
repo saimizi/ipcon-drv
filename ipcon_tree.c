@@ -5,6 +5,9 @@
 #include <linux/slab.h>
 #include <linux/errno.h>
 #include "ipcon_tree.h"
+#ifdef CONFIG_DEBUG_FS
+#include "ipcon_debugfs.h"
+#endif
 
 struct ipcon_tree_node *cp_alloc_srv_node(__u32 port, __u32 ctrl_port,
 					char *name)
@@ -25,6 +28,9 @@ struct ipcon_tree_node *cp_alloc_srv_node(__u32 port, __u32 ctrl_port,
 	newnd->group = IPCON_NO_GROUP;
 	strcpy(newnd->name, name);
 	newnd->last_grp_msg = NULL;
+#ifdef CONFIG_DEBUG_FS
+	newnd->priv = NULL;
+#endif
 
 	return newnd;
 }
@@ -43,10 +49,14 @@ struct ipcon_tree_node *cp_alloc_grp_node(__u32 ctrl_port,
 		return NULL;
 
 	newnd->left = newnd->right = newnd->parent = NULL;
+	newnd->port = 0;
 	newnd->ctrl_port = ctrl_port;
 	strcpy(newnd->name, name);
 	newnd->group = group;
 	newnd->last_grp_msg = NULL;
+#ifdef CONFIG_DEBUG_FS
+	newnd->priv = NULL;
+#endif
 
 	return newnd;
 }
@@ -108,8 +118,13 @@ int cp_detach_node(struct ipcon_tree_root *root, struct ipcon_tree_node *np)
 
 	} while (0);
 
-	if (!ret)
+	if (!ret) {
 		root->count--;
+
+#ifdef CONFIG_DEBUG_FS
+		ipcon_debugfs_remove_entry(np);
+#endif
+	}
 
 	return ret;
 }
@@ -210,8 +225,17 @@ int cp_insert(struct ipcon_tree_root *root, struct ipcon_tree_node *node)
 		}
 	}
 
-	if (!ret)
+	if (!ret) {
 		root->count++;
+
+#ifdef CONFIG_DEBUG_FS
+		/*
+		 * group_bitmap is only used in group tree in which
+		 * ipcon_kern_event is reserved at ipcon_init
+		 */
+		ipcon_debugfs_add_entry(node, (root->group_bitmap[0] == 0));
+#endif
+	}
 
 	return ret;
 }
