@@ -25,7 +25,7 @@ struct ipcon_debugfs_data {
 static ssize_t entry_file_read(struct file *fp, char __user *user_buffer,
 				size_t count, loff_t *position)
 {
-	char buf[1024];
+	char buf[512];
 	char *p = NULL;
 	struct ipcon_debugfs_data *idd = file_inode(fp)->i_private;
 	struct ipcon_tree_node *nd = NULL;
