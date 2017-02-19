@@ -30,6 +30,8 @@ static ssize_t entry_file_read(struct file *fp, char __user *user_buffer,
 	struct ipcon_debugfs_data *idd = file_inode(fp)->i_private;
 	struct ipcon_tree_node *nd = NULL;
 	ssize_t ret = 0;
+	__u32 group_offset = ipcon_get_family()->mcgrp_offset;
+	int len;
 
 	if (!idd)
 		return -EBADF;
@@ -44,31 +46,40 @@ static ssize_t entry_file_read(struct file *fp, char __user *user_buffer,
 			break;
 		}
 
+		p = buf;
 		/* For a service entry, no last message. */
 		if (idd->is_srv) {
-			sprintf(buf,
-				"Name:\t\t%s\nComPort:\t%lu\nCtlPort:\t%lu\n\n",
-				nd->name,
-				(unsigned long)nd->port,
-				(unsigned long)nd->ctrl_port);
+			len = sprintf(p, "Name:\t\t%s\n", nd->name);
+			p += len;
+
+			len = sprintf(p, "ComPort:\t%lu\n",
+				(unsigned long)nd->port);
+			p += len;
+
+			len = sprintf(p, "CtlPort:\t%lu\n",
+				(unsigned long)nd->port);
+			p += len;
 			break;
 		}
 
-		sprintf(buf,
-			"Name:\t\t%s\nGroup:\t\t%lu\nComPort:\t%lu\nCtlPort:\t%lu\n\n",
-			nd->name,
-			(unsigned long)nd->group,
-			(unsigned long)nd->port,
-			(unsigned long)nd->ctrl_port);
+		/* For a group enter, show last message*/
+		len = sprintf(p, "Name:\t\t%s\n", nd->name);
+			p += len;
 
-		p = buf + strlen(buf);
+		len = sprintf(p, "Group:\t\t%lu\n",
+			(unsigned long)(nd->port + group_offset));
+		p += len;
+
+		len = sprintf(p, "CtlPort:\t%lu\n",
+			(unsigned long)nd->port);
+		p += len;
+
 		if (nd->last_grp_msg) {
 			struct nlmsghdr *nlh = NULL;
 			struct nlattr *attrbuf[IPCON_ATTR_MAX + 1];
 			int hdrlen, err;
 			int datalen = 0;
 			char *data = NULL;
-			int len;
 			int i;
 			char tmpc;
 
@@ -94,14 +105,14 @@ static ssize_t entry_file_read(struct file *fp, char __user *user_buffer,
 
 			len = sprintf(p, "Last msg in this group:\n");
 			p += len;
-			len = sprintf(p, "  Size: %lu\n  Dump:\n",
+			len = sprintf(p, "  Size: %lu\n  Dump first 20 byte:\n",
 						(unsigned long)datalen);
 			p += len;
 
 			if (nd->group) {
 
 				for (i = 0; i < datalen; i++) {
-					if (i > 40)
+					if (i > 20)
 						break;
 
 					if (data[i] == '\0')
@@ -109,7 +120,7 @@ static ssize_t entry_file_read(struct file *fp, char __user *user_buffer,
 					else
 						tmpc = data[i];
 
-					len = sprintf(p, " 0x%x(\'%c\')",
+					len = sprintf(p, "    0x%x(\'%c\')\n",
 							tmpc, tmpc);
 					p += len;
 				}
@@ -118,7 +129,11 @@ static ssize_t entry_file_read(struct file *fp, char __user *user_buffer,
 				p++;
 				*p = '\0';
 			} else {
-				/* Group 0: ipcon_kevent */
+				/*
+				 * Group 0: ipcon_kevent
+				 * grp.groupid in ik already includes
+				 * mcgrp_offset
+				 */
 				struct ipcon_kevent *ik =
 					(struct ipcon_kevent *) data;
 				char *event = NULL;
@@ -168,13 +183,17 @@ static ssize_t entry_file_read(struct file *fp, char __user *user_buffer,
 				len = sprintf(p, "    Name :\t%s\n", name);
 				p += len;
 
-				len = sprintf(p, "    Port :\t%lu\n",
-					(unsigned long)port);
-				p += len;
+				if (port) {
+					len = sprintf(p, "    Port :\t%lu\n",
+						(unsigned long)port);
+					p += len;
+				}
 
-				len = sprintf(p, "    Group:\t%lu\n",
-					(unsigned long)group);
-				p += len;
+				if (group) {
+					len = sprintf(p, "    Group:\t%lu\n",
+						(unsigned long)group);
+					p += len;
+				}
 
 			}
 

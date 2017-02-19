@@ -171,7 +171,7 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 
 			ik.type = IPCON_EVENT_GRP_REMOVE;
 			strcpy(ik.grp.name, nd->name);
-			ik.grp.groupid = nd->group;
+			ik.grp.groupid = nd->group + ipcon_fam.mcgrp_offset;
 			ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
 
 			cp_free_node(nd);
@@ -434,7 +434,7 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 
 		ik.type = IPCON_EVENT_GRP_ADD;
 		strcpy(ik.grp.name, name);
-		ik.grp.groupid = nd->group;
+		ik.grp.groupid = nd->group + ipcon_fam.mcgrp_offset;
 
 		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
 
@@ -492,7 +492,8 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 
 		ik.type = IPCON_EVENT_GRP_REMOVE;
 		strcpy(ik.grp.name, name);
-		ik.grp.groupid = nd->group;
+		ik.grp.groupid = nd->group + ipcon_fam.mcgrp_offset;
+
 		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
 
 		cp_free_node(nd);
