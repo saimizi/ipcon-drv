@@ -147,7 +147,6 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 		nd = cp_lookup_by_port(&cp_srvtree_root, (__u32)n->portid);
 		if (nd) {
 			cp_detach_node(&cp_srvtree_root, nd);
-			ipcon_wr_unlock_tree(&cp_srvtree_root);
 
 			ik.type = IPCON_EVENT_SRV_REMOVE;
 			strcpy(ik.srv.name, nd->name);
@@ -379,7 +378,6 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 	char name[IPCON_MAX_GRP_NAME_LEN];
 	__u32 msg_type;
 	struct ipcon_tree_node *nd = NULL;
-
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
 		!info->attrs[IPCON_ATTR_GRP_NAME])
@@ -732,14 +730,20 @@ static struct notifier_block ipcon_netlink_notifier = {
 	.notifier_call = ipcon_netlink_notify,
 };
 
+/* Use "name" to construct rb tree of service and group */
+struct tree_ops name_key_ops = {
+	.compare = compare_byname,
+	.getkey = getkey_byname
+};
+
 int ipcon_genl_init(void)
 {
 	int ret = 0;
 	int i = 0;
 	struct ipcon_tree_node *nd = NULL;
 
-	ipcon_init_tree(&cp_srvtree_root);
-	ipcon_init_tree(&cp_grptree_root);
+	ipcon_init_tree(&cp_srvtree_root, &name_key_ops);
+	ipcon_init_tree(&cp_grptree_root, &name_key_ops);
 
 #ifdef CONFIG_DEBUG_FS
 	if (!ret)

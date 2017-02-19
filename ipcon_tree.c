@@ -22,7 +22,6 @@ struct ipcon_tree_node *cp_alloc_srv_node(__u32 port, __u32 ctrl_port,
 	if (!newnd)
 		return NULL;
 
-	newnd->left = newnd->right = newnd->parent = NULL;
 	newnd->port = port;
 	newnd->ctrl_port = ctrl_port;
 	newnd->group = IPCON_NO_GROUP;
@@ -48,7 +47,6 @@ struct ipcon_tree_node *cp_alloc_grp_node(__u32 ctrl_port,
 	if (!newnd)
 		return NULL;
 
-	newnd->left = newnd->right = newnd->parent = NULL;
 	newnd->port = 0;
 	newnd->ctrl_port = ctrl_port;
 	strcpy(newnd->name, name);
@@ -64,6 +62,9 @@ struct ipcon_tree_node *cp_alloc_grp_node(__u32 ctrl_port,
 void cp_free_node(struct ipcon_tree_node *nd)
 {
 	/* kfree_skb can deal with NULL */
+	if (!nd)
+		return;
+
 	kfree_skb(nd->last_grp_msg);
 	kfree(nd);
 }
@@ -74,158 +75,77 @@ void cp_free_node(struct ipcon_tree_node *nd)
 int cp_detach_node(struct ipcon_tree_root *root, struct ipcon_tree_node *np)
 {
 	int ret = 0;
-	struct ipcon_tree_node *nl = NULL;
-	struct ipcon_tree_node *nr = NULL;
 
-	if (!root || !np || !np->parent || !root->root)
+	if (!root || !np)
 		return -EINVAL;
 
-	do {
-		if (np->left && np->right) {
-			nl = np->left;
-			while (nl->right)
-				nl = nl->right;
-
-			nl->right = np->right;
-			nr = np->left;
-		} else if (np->left) {
-			nr = np->left;
-		} else if (np->right) {
-			nr = np->right;
-		} else {
-			nr = NULL;
-		}
-
-		if (np->parent == np) {
-			if (np->parent != root->root) {
-				ret = -EINVAL;
-				break;
-			}
-			root->root = nr;
-			if (nr)
-				nr->parent = root->root;
-		} else {
-			if (np->parent->left == np)
-				np->parent->left = nr;
-			else
-				np->parent->right = nr;
-
-			if (nr)
-				nr->parent = np->parent;
-		}
-
-		np->parent = np->right = np->left = NULL;
-
-	} while (0);
-
-	if (!ret) {
-		root->count--;
+	rb_erase(&np->node, &root->root);
+	root->count--;
 
 #ifdef CONFIG_DEBUG_FS
-		ipcon_debugfs_remove_entry(np);
+	ipcon_debugfs_remove_entry(np);
 #endif
-	}
 
 	return ret;
 }
 
-struct ipcon_tree_node *cp_lookup(struct ipcon_tree_root *root, char *name)
+struct ipcon_tree_node *cp_lookup(struct ipcon_tree_root *root, void *key)
 {
-	struct ipcon_tree_node *result = NULL;
+	struct rb_node *nd = root->root.rb_node;
 
-	if (!name || !root)
+	if (!root || !root->ops || !key)
 		return NULL;
 
-	result = root->root;
+	while (nd) {
+		struct ipcon_tree_node *itn = rbnd_to_treend(nd);
+		int result;
 
-	while (result) {
-		int ret = strcmp(result->name, name);
-
-		if (ret == 0)
-			break;
-		else if (ret > 0)
-			result = result->left;
-		else if (ret < 0)
-			result = result->right;
+		result = root->ops->compare(itn, key);
+		if (result < 0)
+			nd = nd->rb_right;
+		else if (result > 0)
+			nd = nd->rb_left;
 		else
-			result = NULL;
+			return itn;
 	}
 
-	return result;
-}
-
-/*
- * Compare two nodes by using name.
- *
- * Return value
- * - n1 < n2: -1
- * - n1 = n2: 0
- * - n1 > n2: 1
- * - error:
- *	return a negative value beside -1.
- */
-int cp_comp(struct ipcon_tree_node *n1, struct ipcon_tree_node *n2)
-{
-	int ret = 0;
-
-	if (!cp_valid_node(n1) || !cp_valid_node(n2))
-		return -EINVAL;
-
-	ret = strcmp(n1->name, n2->name);
-	if (ret < 0)
-		ret = -1;
-
-	if (ret > 0)
-		ret = 1;
-
-	return ret;
+	return NULL;
 }
 
 int cp_insert(struct ipcon_tree_root *root, struct ipcon_tree_node *node)
 {
 	int ret = 0;
-	struct ipcon_tree_node *it = NULL;
+	struct rb_node **new = NULL;
+	struct rb_node *parent = NULL;
 
 	if (!root || !cp_valid_node(node))
 		return -EINVAL;
 
-	if (root->root == NULL) {
-		root->root = node;
-		node->parent = root->root;
-	} else {
-		it = root->root;
+	new = &(root->root.rb_node);
 
-		while (it) {
-			ret = cp_comp(it, node);
-			if (ret == -1) {
-				if (!it->right) {
-					it->right = node;
-					node->parent = it;
-					ret = 0;
-					break;
-				}
+	while (*new) {
+		struct ipcon_tree_node *itn = rbnd_to_treend(*new);
+		int result;
+		void *key = root->ops->getkey(node);
 
-				it = it->right;
+		result = root->ops->compare(itn, key);
+		parent = *new;
 
-			} else if (ret == 1) {
-				if (!it->left) {
-					it->left = node;
-					node->parent = it;
-					ret = 0;
-					break;
-				}
+		if (result < 0)
+			new = &((*new)->rb_right);
+		else if (result > 0)
+			new = &((*new)->rb_left);
+		else
+			ret = -EEXIST;
 
-				it = it->left;
+		if (ret < 0)
+			break;
 
-			} else {
-				if (ret == 0)
-					ret = -EEXIST;
-				break;
-			}
-		}
 	}
 
 	if (!ret) {
+		rb_link_node(&node->node, parent, new);
+		rb_insert_color(&node->node, &root->root);
 		root->count++;
 
 #ifdef CONFIG_DEBUG_FS
@@ -240,128 +160,71 @@ int cp_insert(struct ipcon_tree_root *root, struct ipcon_tree_node *node)
 	return ret;
 }
 
-int cp_walk_tree(struct ipcon_tree_node *root,
-		int (*process_node)(struct ipcon_tree_node *, void *),
-		void *para, int order, int stop_on_error)
-{
-	int ret = 0;
-
-	if (!root)
-		return ret;
-
-	if (order == 1) {
-		ret = process_node(root, para);
-		if (stop_on_error && ret)
-			return ret;
-	}
-
-	if (root->left) {
-		ret = cp_walk_tree(root->left,
-				process_node,
-				para,
-				order,
-				stop_on_error);
-
-		if (stop_on_error && ret)
-			return ret;
-	}
-
-	if (order == 2) {
-		ret = process_node(root, para);
-		if (stop_on_error && ret)
-			return ret;
-	}
-
-	if (root->right) {
-		ret = cp_walk_tree(root->right,
-				process_node,
-				para,
-				order,
-				stop_on_error);
-
-		if (stop_on_error && ret)
-			return ret;
-	}
-
-	if (order == 3) {
-		ret = process_node(root, para);
-		if (stop_on_error && ret)
-			return ret;
-	}
-
-	return ret;
-}
-
-static int walk_free_node(struct ipcon_tree_node *nd, void *para)
-{
-	if (nd->parent) {
-		if (nd->parent->left == nd)
-			nd->parent->left = NULL;
-
-		if (nd->parent->right == nd)
-			nd->parent->right = NULL;
-	}
-
-	cp_free_node(nd);
-
-	return 0;
-}
-
 void cp_free_tree(struct ipcon_tree_root *root)
 {
-	cp_walk_tree(root->root, walk_free_node, NULL, 3, 0);
-	root->root = NULL;
-}
+	struct rb_node *node = NULL;
 
-static int walk_print_node(struct ipcon_tree_node *nd, void *para)
-{
-	if (nd)
-		ipcon_info("Service: %s@%d\n", nd->name, nd->port);
+	if (!root)
+		return;
 
-	return 0;
+	do {
+		node = rb_first(&root->root);
+		if (node) {
+			struct ipcon_tree_node *itn = rbnd_to_treend(node);
+
+			if (!cp_detach_node(root, itn))
+				cp_free_node(itn);
+		}
+	} while (node);
 }
 
 void cp_print_tree(struct ipcon_tree_root *root)
 {
-	cp_walk_tree(root->root, walk_print_node, NULL, 2, 0);
-}
+	int is_grp_tree = (root->group_bitmap[0] != 0);
+	struct rb_node *node = NULL;
 
-struct nd_search_info {
-	u32 port;
-	struct ipcon_tree_node *nd;
-};
+	if (!root)
+		return;
 
-static int search_nd_by_port(struct ipcon_tree_node *nd, void *para)
-{
-	struct nd_search_info *nsi = (struct nd_search_info *)para;
-	int ret = 0;
+	for (node = rb_first(&root->root); node; node = rb_next(node)) {
+		struct ipcon_tree_node *itn = rbnd_to_treend(node);
 
-	if (nd->port == nsi->port) {
-		nsi->nd = nd;
-		ret = 1;
-	} else if (nd->ctrl_port == nsi->port) {
-		nsi->nd = nd;
-		ret = 1;
+		if (is_grp_tree)
+			ipcon_info("%s %s grp: %lu ctrlport: %lu lastmsg? %s\n",
+					"Group",
+					itn->name,
+					(unsigned long)itn->group,
+					(unsigned long)itn->ctrl_port,
+					itn->last_grp_msg ? "yes" : "no");
+		else
+			ipcon_info("%s %s port: %lu ctrlport: %lu\n",
+					"Service",
+					itn->name,
+					(unsigned long)itn->port,
+					(unsigned long)itn->ctrl_port);
 	}
-
-	return ret;
 }
 
 struct ipcon_tree_node *cp_lookup_by_port(struct ipcon_tree_root *root,
 					__u32 port)
 {
-	struct nd_search_info result;
-	int ret = 0;
+	struct rb_node *node = NULL;
+	struct ipcon_tree_node *result = NULL;
 
-	if (!port || !root || !root->root)
+	if (!port || !root)
 		return NULL;
 
-	memset(&result, 0, sizeof(result));
-	result.port = port;
+	for (node = rb_first(&root->root); node; node = rb_next(node)) {
+		result = rbnd_to_treend(node);
 
-	ret = cp_walk_tree(root->root, search_nd_by_port, &result, 2, 1);
-	if (ret == 1)
-		return result.nd;
+		if (result->port == port)
+			break;
 
-	return NULL;
+		if (result->ctrl_port == port)
+			break;
+
+		result = NULL;
+	}
+
+	return result;
 }
