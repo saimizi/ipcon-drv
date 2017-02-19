@@ -76,7 +76,7 @@ static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags, int lock)
 		}
 
 		ret = nla_put_string(msg, IPCON_ATTR_GRP_NAME,
-				IPCON_KERNEL_GROUP_NAME);
+				IPCON_KERNEL_GROUP);
 		if (ret < 0) {
 			genlmsg_cancel(msg, hdr);
 			nlmsg_free(msg);
@@ -100,7 +100,7 @@ static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags, int lock)
 		if (lock)
 			ipcon_wr_lock_tree(&cp_grptree_root);
 
-		nd = cp_lookup(&cp_grptree_root, IPCON_KERNEL_GROUP_NAME);
+		nd = cp_lookup(&cp_grptree_root, IPCON_KERNEL_GROUP);
 		if (!nd)
 			BUG();
 
@@ -115,7 +115,7 @@ static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags, int lock)
 			ipcon_wr_unlock_tree(&cp_grptree_root);
 
 		genlmsg_multicast(&ipcon_fam, msg, 0,
-					IPCON_KERNEL_GROUP, flags);
+					IPCON_KERNEL_GROUP_PORT, flags);
 
 	} while (0);
 }
@@ -390,7 +390,7 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 	nla_strlcpy(name, info->attrs[IPCON_ATTR_GRP_NAME],
 		IPCON_MAX_GRP_NAME_LEN);
 
-	if (!strcmp(IPCON_KERNEL_GROUP_NAME, name))
+	if (!strcmp(IPCON_KERNEL_GROUP, name))
 		return -EINVAL;
 
 	ipcon_wr_lock_tree(&cp_grptree_root);
@@ -604,7 +604,7 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 	nla_strlcpy(name, info->attrs[IPCON_ATTR_GRP_NAME],
 			IPCON_MAX_GRP_NAME_LEN);
 
-	if (!strcmp(IPCON_KERNEL_GROUP_NAME, name))
+	if (!strcmp(IPCON_KERNEL_GROUP, name))
 		return -EINVAL;
 
 	ipcon_wr_lock_tree(&cp_grptree_root);
@@ -746,7 +746,7 @@ int ipcon_genl_init(void)
 #endif
 
 	/* setup IPCON_KERNEL_GROUP at id 0 */
-	nd = cp_alloc_grp_node(0, IPCON_KERNEL_GROUP_NAME, 0);
+	nd = cp_alloc_grp_node(0, IPCON_KERNEL_GROUP, 0);
 	if (!nd)
 		return -ENOMEM;
 
@@ -762,7 +762,7 @@ int ipcon_genl_init(void)
 			sprintf(ipcon_mcgroups[i].name, "%s%d",
 					UNUSED_GROUP_NAME, i);
 		else
-			strcpy(ipcon_mcgroups[i].name, IPCON_KERNEL_GROUP_NAME);
+			strcpy(ipcon_mcgroups[i].name, IPCON_KERNEL_GROUP);
 	}
 
 	ret = genl_register_family_with_ops_groups(&ipcon_fam, ipcon_ops,
