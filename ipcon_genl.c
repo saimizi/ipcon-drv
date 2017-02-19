@@ -139,24 +139,26 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 
 	/*
 	 * Release related service and inform user space
-	 * 1 peer is corresponding to just 1 service.
+	 * 1 peer may be  corresponding to multi services.
 	 */
 	ipcon_wr_lock_tree(&cp_srvtree_root);
 
-	nd = cp_lookup_by_port(&cp_srvtree_root, (__u32)n->portid);
-	if (nd) {
-		cp_detach_node(&cp_srvtree_root, nd);
-		ipcon_wr_unlock_tree(&cp_srvtree_root);
+	do {
+		nd = cp_lookup_by_port(&cp_srvtree_root, (__u32)n->portid);
+		if (nd) {
+			cp_detach_node(&cp_srvtree_root, nd);
+			ipcon_wr_unlock_tree(&cp_srvtree_root);
 
-		ik.type = IPCON_EVENT_SRV_REMOVE;
-		strcpy(ik.srv.name, nd->name);
-		ik.srv.portid = nd->port;
-		ipcon_send_kevent(&ik, GFP_ATOMIC, 1);
+			ik.type = IPCON_EVENT_SRV_REMOVE;
+			strcpy(ik.srv.name, nd->name);
+			ik.srv.portid = nd->port;
+			ipcon_send_kevent(&ik, GFP_ATOMIC, 1);
 
-		cp_free_node(nd);
-	} else {
-		ipcon_wr_unlock_tree(&cp_srvtree_root);
-	}
+			cp_free_node(nd);
+		}
+	} while (nd);
+
+	ipcon_wr_unlock_tree(&cp_srvtree_root);
 
 	/*
 	 * Release related group and inform user space
