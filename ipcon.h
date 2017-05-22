@@ -40,6 +40,7 @@ enum {
 	IPCON_ATTR_GRP_NAME,
 	IPCON_ATTR_DATA,
 	IPCON_ATTR_FLAG,
+	IPCON_ATTR_PEER_CNT,
 
 	/* Add attr here */
 
@@ -50,6 +51,7 @@ enum {
 
 /* IPCON commands */
 enum {
+	IPCON_PEER_REG,
 	IPCON_SRV_REG,
 	IPCON_SRV_UNREG,
 	IPCON_SRV_RESLOVE,

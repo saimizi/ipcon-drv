@@ -2,6 +2,7 @@
  * Copyright (C) 2016  Seimizu Joukan
  */
 
+#include <linux/module.h>
 #include <net/sock.h>
 #include <net/netlink.h>
 #include <net/genetlink.h>
@@ -43,7 +44,10 @@ static const struct nla_policy ipcon_policy[NUM_IPCON_ATTR] = {
 				.len = IPCON_MAX_GRP_NAME_LEN - 1 },
 	[IPCON_ATTR_DATA] = {.type = NLA_BINARY, .len = IPCON_MAX_MSG_LEN},
 	[IPCON_ATTR_FLAG] = {.type = NLA_FLAG},
+	[IPCON_ATTR_PEER_CNT] = {.type = NLA_U32},
 };
+
+static void ipcon_peer_unreg(void);
 
 static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags, int lock)
 {
@@ -185,6 +189,9 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 	ik.type = IPCON_EVENT_PEER_REMOVE;
 	ik.peer.portid = n->portid;
 	ipcon_send_kevent(&ik, GFP_ATOMIC, 1);
+
+	/* Decrease the module reference count */
+	ipcon_peer_unreg();
 
 	return 0;
 }
@@ -680,6 +687,33 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 	return ret;
 }
 
+static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
+{
+	__u32 peer_cnt;
+	int i;
+	int ret;
+
+	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
+		!info->attrs[IPCON_ATTR_PEER_CNT])
+		return -EINVAL;
+
+	peer_cnt = nla_get_u32(info->attrs[IPCON_ATTR_PEER_CNT]);
+
+	for (i = 0; i < peer_cnt; i++) {
+		if (!try_module_get(THIS_MODULE)) {
+			ret = -ENOMEM;
+			break;
+		}
+	}
+
+	return ret;
+}
+
+static void ipcon_peer_unreg(void)
+{
+	module_put(THIS_MODULE);
+}
+
 static const struct genl_ops ipcon_ops[] = {
 	{
 		.cmd = IPCON_SRV_REG,
@@ -722,7 +756,13 @@ static const struct genl_ops ipcon_ops[] = {
 		.doit = ipcon_multicast_msg,
 		.policy = ipcon_policy,
 		/*.flags = GENL_ADMIN_PERM,*/
-	}
+	},
+	{
+		.cmd = IPCON_PEER_REG,
+		.doit = ipcon_peer_reg,
+		.policy = ipcon_policy,
+		/*.flags = GENL_ADMIN_PERM,*/
+	},
 };
 
 
