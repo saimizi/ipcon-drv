@@ -9,9 +9,8 @@
 
 #define IPCON_GENL_NAME		"ipcon"
 #define IPCON_KERNEL_GROUP	"ipcon_kevent"
-#define IPCON_MAX_SRV_NAME_LEN	32
-#define IPCON_MAX_GRP_NAME_LEN	GENL_NAMSIZ
-#define IPCON_MAX_GROUP_NUM	48
+#define IPCON_MAX_NAME_LEN	64
+#define IPCON_MAX_GROUP		48
 
 
 /*
@@ -28,8 +27,6 @@
 
 /* IPCON_ATTR_SRV_GROUP */
 #define IPCON_KERNEL_GROUP_PORT	0
-#define IPCON_AUTO_GROUP	(IPCON_MAX_GROUP_NUM + 1)
-#define IPCON_NO_GROUP		(IPCON_MAX_GROUP_NUM + 2)
 
 enum {
 	IPCON_ATTR_UNSPEC,
@@ -65,7 +62,7 @@ enum {
 
 static inline int valid_ipcon_group(__u32 group)
 {
-	return (group < IPCON_MAX_GROUP_NUM - 1);
+	return (group < IPCON_MAX_GROUP - 1);
 }
 
 static inline int valid_user_ipcon_group(__u32 group)
@@ -85,11 +82,11 @@ struct ipcon_kevent {
 	enum ipcon_kevent_type type;
 	union {
 		struct {
-			char name[IPCON_MAX_SRV_NAME_LEN];
+			char name[IPCON_MAX_NAME_LEN];
 			__u32 portid;
 		} srv;
 		struct {
-			char name[IPCON_MAX_GRP_NAME_LEN];
+			char name[IPCON_MAX_NAME_LEN];
 			__u32 groupid;
 		} grp;
 		struct {
