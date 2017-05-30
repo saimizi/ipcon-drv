@@ -38,7 +38,6 @@ enum {
 	IPCON_ATTR_DATA,
 	IPCON_ATTR_FLAG,
 	IPCON_ATTR_PEER_NAME,
-	IPCON_ATTR_PEER_CNT,
 
 	/* Add attr here */
 

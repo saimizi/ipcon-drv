@@ -43,10 +43,7 @@ static const struct nla_policy ipcon_policy[NUM_IPCON_ATTR] = {
 	[IPCON_ATTR_FLAG] = {.type = NLA_FLAG},
 	[IPCON_ATTR_PEER_NAME] = {.type = NLA_NUL_STRING,
 				.len = IPCON_MAX_NAME_LEN - 1 },
-	[IPCON_ATTR_PEER_CNT] = {.type = NLA_U32},
 };
-
-static void ipcon_peer_unreg(void);
 
 static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags, int lock)
 {
@@ -173,11 +170,11 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
 
 		ipn_free(ipn);
+
+		/* Decrease reference count */
+		module_put(THIS_MODULE);
 	}
 	ipd_wr_unlock(ipcon_db);
-
-	/* Decrease the module reference count */
-	ipcon_peer_unreg();
 
 	return 0;
 }
@@ -597,9 +594,7 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 
 static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 {
-	__u32 peer_cnt = 0;
 	char name[IPCON_MAX_NAME_LEN];
-	int i;
 	int ret = 0;
 	struct ipcon_peer_node *ipn = NULL;
 	__u32 port = 0;
@@ -607,8 +602,7 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
 		!info->attrs[IPCON_ATTR_PORT] ||
-		!info->attrs[IPCON_ATTR_PEER_NAME] ||
-		!info->attrs[IPCON_ATTR_PEER_CNT])
+		!info->attrs[IPCON_ATTR_PEER_NAME])
 		return -EINVAL;
 
 	ipd_wr_lock(ipcon_db);
@@ -629,13 +623,10 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
-		peer_cnt = nla_get_u32(info->attrs[IPCON_ATTR_PEER_CNT]);
-		for (i = 0; i < peer_cnt; i++) {
-			if (!try_module_get(THIS_MODULE)) {
-				ret = -ENOMEM;
-				ipn_free(ipn);
-				break;
-			}
+		if (!try_module_get(THIS_MODULE)) {
+			ret = -ENOMEM;
+			ipn_free(ipn);
+			break;
 		}
 
 		memset(&ik, 0, sizeof(ik));
@@ -649,11 +640,6 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 
 	return ret;
 
-}
-
-static void ipcon_peer_unreg(void)
-{
-	module_put(THIS_MODULE);
 }
 
 static const struct genl_ops ipcon_ops[] = {
