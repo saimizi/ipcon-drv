@@ -80,8 +80,10 @@ struct ipcon_kevent {
 	enum ipcon_kevent_type type;
 	union {
 		struct {
-			char name[IPCON_MAX_NAME_LEN];
+			char group_name[IPCON_MAX_NAME_LEN];
 			__u32 group;
+			char peer_name[IPCON_MAX_NAME_LEN];
+			__u32 port;
 		} grp;
 		struct {
 			char name[IPCON_MAX_NAME_LEN];

@@ -147,23 +147,30 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 	ipn = ipd_lookup_byport(ipcon_db, (u32)n->portid);
 	if (ipn) {
 		ipn_del(ipn);
+
+		if (!hash_empty(ipn->ipn_group_ht)) {
+			hash_for_each(ipn->ipn_group_ht, bkt, igi, igi_hgroup) {
+				igi_del(igi);
+				unreg_group(ipcon_db, igi->group);
+
+				ik.type = IPCON_EVENT_GRP_REMOVE;
+
+				strcpy(ik.grp.group_name, igi->name);
+				ik.grp.group = igi->group +
+					ipcon_fam.mcgrp_offset;
+				strcpy(ik.grp.peer_name, ipn->name);
+				ik.grp.port = ipn->port;
+				ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
+
+				igi_free(igi);
+			}
+		}
+
+		memset(&ik, 0, sizeof(ik));
 		ik.type = IPCON_EVENT_PEER_REMOVE;
 		strcpy(ik.peer.name, ipn->name);
 		ik.peer.port = ipn->port;
 		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
-
-		if (!hash_empty(ipn->ipn_group_ht))
-			hash_for_each(ipn->ipn_group_ht, bkt, igi, igi_hgroup) {
-				igi_del(igi);
-
-				ik.type = IPCON_EVENT_GRP_REMOVE;
-				strcpy(ik.grp.name, igi->name);
-				ik.grp.group = igi->group +
-					ipcon_fam.mcgrp_offset;
-				unreg_group(ipcon_db, igi->group);
-				ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
-				igi_free(igi);
-			}
 
 		ipn_free(ipn);
 	}
@@ -310,8 +317,10 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 		reg_group(ipcon_db, id);
 
 		ik.type = IPCON_EVENT_GRP_ADD;
-		strcpy(ik.grp.name, name);
+		strcpy(ik.grp.group_name, name);
 		ik.grp.group = igi->group + ipcon_fam.mcgrp_offset;
+		strcpy(ik.grp.peer_name, ipn->name);
+		ik.grp.port = ipn->port;
 		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
 
 	} while (0);
@@ -372,8 +381,10 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 		igi_del(igi);
 
 		ik.type = IPCON_EVENT_GRP_REMOVE;
-		strcpy(ik.grp.name, name);
+		strcpy(ik.grp.group_name, name);
 		ik.grp.group = igi->group + ipcon_fam.mcgrp_offset;
+		strcpy(ik.grp.peer_name, ipn->name);
+		ik.grp.port = ipn->port;
 		ipcon_send_kevent(&ik, GFP_KERNEL, 0);
 
 		igi_free(igi);
