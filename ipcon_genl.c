@@ -720,7 +720,7 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 {
 	__u32 peer_cnt;
 	int i;
-	int ret;
+	int ret = 0;
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
 		!info->attrs[IPCON_ATTR_PEER_CNT])
