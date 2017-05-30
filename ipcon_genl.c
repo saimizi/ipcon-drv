@@ -189,7 +189,6 @@ static int ipcon_srv_reg(struct sk_buff *skb, struct genl_info *info)
 	struct ipcon_peer_node *ipn = NULL;
 
 	ipd_wr_lock(ipcon_db);
-
 	do {
 
 		if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
@@ -232,7 +231,7 @@ static int ipcon_srv_reg(struct sk_buff *skb, struct genl_info *info)
 		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
 	}
 
-	ipd_wr_lock(ipcon_db);
+	ipd_wr_unlock(ipcon_db);
 
 
 	return ret;
@@ -604,6 +603,7 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 		}
 
 	} while (0);
+
 	ipd_rd_unlock(ipcon_db);
 
 	return ret;
@@ -638,7 +638,7 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 	if (!strcmp(IPCON_KERNEL_GROUP, name))
 		return -EINVAL;
 
-	ipd_wr_unlock(ipcon_db);
+	ipd_wr_lock(ipcon_db);
 	do {
 		struct sk_buff *msg = NULL;
 

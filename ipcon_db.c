@@ -20,6 +20,8 @@ struct ipcon_group_info *igi_alloc(char *name, unsigned int group, gfp_t flag)
 	strcpy(igi->name, name);
 	igi->group = group;
 	igi->last_grp_msg = NULL;
+	INIT_HLIST_NODE(&igi->igi_hname);
+	INIT_HLIST_NODE(&igi->igi_hgroup);
 
 	return igi;
 }
@@ -60,6 +62,8 @@ struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port,
 	ipn->ctrl_port = ctrl_port;
 	hash_init(ipn->ipn_group_ht);
 	hash_init(ipn->ipn_name_ht);
+	INIT_HLIST_NODE(&ipn->ipn_hname);
+	INIT_HLIST_NODE(&ipn->ipn_hport);
 	strcpy(ipn->name, name);
 
 	return ipn;
