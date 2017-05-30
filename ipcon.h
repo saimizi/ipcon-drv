@@ -37,6 +37,7 @@ enum {
 	IPCON_ATTR_GRP_NAME,
 	IPCON_ATTR_DATA,
 	IPCON_ATTR_FLAG,
+	IPCON_ATTR_PEER_NAME,
 	IPCON_ATTR_PEER_CNT,
 
 	/* Add attr here */
@@ -49,8 +50,6 @@ enum {
 /* IPCON commands */
 enum {
 	IPCON_PEER_REG,
-	IPCON_SRV_REG,
-	IPCON_SRV_UNREG,
 	IPCON_SRV_RESLOVE,
 	IPCON_GRP_REG,
 	IPCON_GRP_UNREG,
@@ -71,11 +70,10 @@ static inline int valid_user_ipcon_group(__u32 group)
 }
 
 enum ipcon_kevent_type {
-	IPCON_EVENT_SRV_ADD,
-	IPCON_EVENT_SRV_REMOVE,
+	IPCON_EVENT_PEER_ADD,
+	IPCON_EVENT_PEER_REMOVE,
 	IPCON_EVENT_GRP_ADD,
 	IPCON_EVENT_GRP_REMOVE,
-	IPCON_EVENT_PEER_REMOVE,
 };
 
 struct ipcon_kevent {
@@ -83,14 +81,11 @@ struct ipcon_kevent {
 	union {
 		struct {
 			char name[IPCON_MAX_NAME_LEN];
-			__u32 portid;
-		} srv;
-		struct {
-			char name[IPCON_MAX_NAME_LEN];
-			__u32 groupid;
+			__u32 group;
 		} grp;
 		struct {
-			__u32 portid;
+			char name[IPCON_MAX_NAME_LEN];
+			__u32 port;
 		} peer;
 	};
 };

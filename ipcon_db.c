@@ -162,6 +162,7 @@ struct ipcon_peer_db *ipd_alloc(gfp_t flag)
 	rwlock_init(&ipd->lock);
 	hash_init(ipd->ipd_name_ht);
 	hash_init(ipd->ipd_port_ht);
+	memset(ipd->group_bitmap, 0, sizeof(ipd->group_bitmap));
 
 	return ipd;
 }

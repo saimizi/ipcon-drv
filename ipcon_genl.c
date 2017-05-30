@@ -36,13 +36,13 @@ static struct genl_family ipcon_fam = {
 static const struct nla_policy ipcon_policy[NUM_IPCON_ATTR] = {
 	[IPCON_ATTR_MSG_TYPE] = {.type = NLA_U32},
 	[IPCON_ATTR_PORT] = {.type = NLA_U32},
-	[IPCON_ATTR_SRV_NAME] = {.type = NLA_NUL_STRING,
-				.len = IPCON_MAX_NAME_LEN - 1},
 	[IPCON_ATTR_GROUP] = {.type = NLA_U32},
 	[IPCON_ATTR_GRP_NAME] = {.type = NLA_NUL_STRING,
 				.len = IPCON_MAX_NAME_LEN - 1 },
 	[IPCON_ATTR_DATA] = {.type = NLA_BINARY, .len = IPCON_MAX_MSG_LEN},
 	[IPCON_ATTR_FLAG] = {.type = NLA_FLAG},
+	[IPCON_ATTR_PEER_NAME] = {.type = NLA_NUL_STRING,
+				.len = IPCON_MAX_NAME_LEN - 1 },
 	[IPCON_ATTR_PEER_CNT] = {.type = NLA_U32},
 };
 
@@ -147,9 +147,9 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 	ipn = ipd_lookup_byport(ipcon_db, (u32)n->portid);
 	if (ipn) {
 		ipn_del(ipn);
-		ik.type = IPCON_EVENT_SRV_REMOVE;
-		strcpy(ik.srv.name, ipn->name);
-		ik.srv.portid = ipn->port;
+		ik.type = IPCON_EVENT_PEER_REMOVE;
+		strcpy(ik.peer.name, ipn->name);
+		ik.peer.port = ipn->port;
 		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
 
 		if (!hash_empty(ipn->ipn_group_ht))
@@ -158,7 +158,7 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 
 				ik.type = IPCON_EVENT_GRP_REMOVE;
 				strcpy(ik.grp.name, igi->name);
-				ik.grp.groupid = igi->group +
+				ik.grp.group = igi->group +
 					ipcon_fam.mcgrp_offset;
 				unreg_group(ipcon_db, igi->group);
 				ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
@@ -168,11 +168,6 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 		ipn_free(ipn);
 	}
 	ipd_wr_unlock(ipcon_db);
-
-	/* Inform user space of peer remove */
-	ik.type = IPCON_EVENT_PEER_REMOVE;
-	ik.peer.portid = n->portid;
-	ipcon_send_kevent(&ik, GFP_ATOMIC, 1);
 
 	/* Decrease the module reference count */
 	ipcon_peer_unreg();
@@ -180,133 +175,6 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 	return 0;
 }
 
-static int ipcon_srv_reg(struct sk_buff *skb, struct genl_info *info)
-{
-	int ret = 0;
-	char name[IPCON_MAX_NAME_LEN];
-	__u32 port;
-	__u32 msg_type;
-	struct ipcon_peer_node *ipn = NULL;
-
-	ipd_wr_lock(ipcon_db);
-	do {
-
-		if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
-			!info->attrs[IPCON_ATTR_PORT] ||
-			!info->attrs[IPCON_ATTR_SRV_NAME]) {
-			ret = -EINVAL;
-			break;
-		}
-
-		msg_type = nla_get_u32(info->attrs[IPCON_ATTR_MSG_TYPE]);
-		if (msg_type != IPCON_MSG_UNICAST) {
-			ret = -EINVAL;
-			break;
-		}
-
-		port = nla_get_u32(info->attrs[IPCON_ATTR_PORT]);
-		nla_strlcpy(name, info->attrs[IPCON_ATTR_SRV_NAME],
-				IPCON_MAX_NAME_LEN);
-
-
-		ipn = ipn_alloc(port, info->snd_portid, name, GFP_KERNEL);
-		if (!ipn) {
-			ret = -ENOMEM;
-			break;
-		}
-
-		ret = ipd_insert(ipcon_db, ipn);
-		if (ret < 0)
-			ipn_free(ipn);
-
-	} while (0);
-
-	if (!ret) {
-		struct ipcon_kevent ik;
-
-		ik.type = IPCON_EVENT_SRV_ADD;
-		strcpy(ik.srv.name, name);
-		ik.srv.portid = ipn->port;
-
-		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
-	}
-
-	ipd_wr_unlock(ipcon_db);
-
-
-	return ret;
-}
-
-static int ipcon_srv_unreg(struct sk_buff *skb, struct genl_info *info)
-{
-	int ret = 0;
-	char name[IPCON_MAX_NAME_LEN];
-	__u32 ctrl_port;
-	__u32 msg_type;
-	struct ipcon_peer_node *ipn = NULL;
-	struct ipcon_group_info *igi = NULL;
-	int bkt = 0;
-
-	do {
-		struct ipcon_kevent ik;
-
-		if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
-			!info->attrs[IPCON_ATTR_SRV_NAME]) {
-			ret = -EINVAL;
-			break;
-		}
-
-		msg_type = nla_get_u32(info->attrs[IPCON_ATTR_MSG_TYPE]);
-		if (msg_type != IPCON_MSG_UNICAST) {
-			ret = -EINVAL;
-			break;
-		}
-
-		ctrl_port = info->snd_portid;
-		nla_strlcpy(name, info->attrs[IPCON_ATTR_SRV_NAME],
-				IPCON_MAX_NAME_LEN);
-
-		ipd_wr_lock(ipcon_db);
-		ipn = ipd_lookup_byname(ipcon_db, name);
-		if (!ipn) {
-			ret = -ENOENT;
-			ipd_wr_unlock(ipcon_db);
-			break;
-		}
-
-		/* Only the port who registered service can unregister it */
-		if (ipn->ctrl_port != ctrl_port) {
-			ret = -EPERM;
-			ipd_wr_unlock(ipcon_db);
-			break;
-		}
-
-		ipn_del(ipn);
-
-		ik.type = IPCON_EVENT_SRV_REMOVE;
-		strcpy(ik.srv.name, name);
-		ik.srv.portid = ipn->port;
-		ipcon_send_kevent(&ik, GFP_KERNEL, 0);
-
-		if (!hash_empty(ipn->ipn_group_ht))
-			hash_for_each(ipn->ipn_group_ht, bkt, igi, igi_hgroup) {
-				igi_del(igi);
-
-				ik.type = IPCON_EVENT_GRP_REMOVE;
-				strcpy(ik.grp.name, igi->name);
-				ik.grp.groupid = igi->group +
-					ipcon_fam.mcgrp_offset;
-				unreg_group(ipcon_db, igi->group);
-				ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
-				igi_free(igi);
-			}
-
-		ipn_free(ipn);
-		ipd_wr_unlock(ipcon_db);
-	} while (0);
-
-	return ret;
-}
 
 static int ipcon_srv_reslove(struct sk_buff *skb, struct genl_info *info)
 {
@@ -443,7 +311,7 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 
 		ik.type = IPCON_EVENT_GRP_ADD;
 		strcpy(ik.grp.name, name);
-		ik.grp.groupid = igi->group + ipcon_fam.mcgrp_offset;
+		ik.grp.group = igi->group + ipcon_fam.mcgrp_offset;
 		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
 
 	} while (0);
@@ -505,7 +373,7 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 
 		ik.type = IPCON_EVENT_GRP_REMOVE;
 		strcpy(ik.grp.name, name);
-		ik.grp.groupid = igi->group + ipcon_fam.mcgrp_offset;
+		ik.grp.group = igi->group + ipcon_fam.mcgrp_offset;
 		ipcon_send_kevent(&ik, GFP_KERNEL, 0);
 
 		igi_free(igi);
@@ -718,24 +586,58 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 
 static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 {
-	__u32 peer_cnt;
+	__u32 peer_cnt = 0;
+	char name[IPCON_MAX_NAME_LEN];
 	int i;
 	int ret = 0;
+	struct ipcon_peer_node *ipn = NULL;
+	__u32 port = 0;
+	struct ipcon_kevent ik;
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
+		!info->attrs[IPCON_ATTR_PORT] ||
+		!info->attrs[IPCON_ATTR_PEER_NAME] ||
 		!info->attrs[IPCON_ATTR_PEER_CNT])
 		return -EINVAL;
 
-	peer_cnt = nla_get_u32(info->attrs[IPCON_ATTR_PEER_CNT]);
+	ipd_wr_lock(ipcon_db);
+	do {
+		port = nla_get_u32(info->attrs[IPCON_ATTR_PORT]);
+		nla_strlcpy(name, info->attrs[IPCON_ATTR_PEER_NAME],
+				IPCON_MAX_NAME_LEN);
 
-	for (i = 0; i < peer_cnt; i++) {
-		if (!try_module_get(THIS_MODULE)) {
+		ipn = ipn_alloc(port, info->snd_portid, name, GFP_KERNEL);
+		if (!ipn) {
 			ret = -ENOMEM;
 			break;
 		}
-	}
+
+		ret = ipd_insert(ipcon_db, ipn);
+		if (ret < 0) {
+			ipn_free(ipn);
+			break;
+		}
+
+		peer_cnt = nla_get_u32(info->attrs[IPCON_ATTR_PEER_CNT]);
+		for (i = 0; i < peer_cnt; i++) {
+			if (!try_module_get(THIS_MODULE)) {
+				ret = -ENOMEM;
+				ipn_free(ipn);
+				break;
+			}
+		}
+
+		memset(&ik, 0, sizeof(ik));
+		ik.type = IPCON_EVENT_PEER_ADD;
+		strcpy(ik.peer.name, ipn->name);
+		ik.peer.port = ipn->port;
+		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
+
+	} while (0);
+	ipd_wr_unlock(ipcon_db);
 
 	return ret;
+
 }
 
 static void ipcon_peer_unreg(void)
@@ -744,18 +646,6 @@ static void ipcon_peer_unreg(void)
 }
 
 static const struct genl_ops ipcon_ops[] = {
-	{
-		.cmd = IPCON_SRV_REG,
-		.doit = ipcon_srv_reg,
-		.policy = ipcon_policy,
-		/*.flags = GENL_ADMIN_PERM,*/
-	},
-	{
-		.cmd = IPCON_SRV_UNREG,
-		.doit = ipcon_srv_unreg,
-		.policy = ipcon_policy,
-		/*.flags = GENL_ADMIN_PERM,*/
-	},
 	{
 		.cmd = IPCON_SRV_RESLOVE,
 		.doit = ipcon_srv_reslove,
