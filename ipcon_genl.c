@@ -43,6 +43,8 @@ static const struct nla_policy ipcon_policy[NUM_IPCON_ATTR] = {
 	[IPCON_ATTR_FLAG] = {.type = NLA_FLAG},
 	[IPCON_ATTR_PEER_NAME] = {.type = NLA_NUL_STRING,
 				.len = IPCON_MAX_NAME_LEN - 1 },
+	[IPCON_ATTR_SRC_PEER] = {.type = NLA_NUL_STRING,
+				.len = IPCON_MAX_NAME_LEN - 1 },
 };
 
 static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags, int lock)
@@ -480,10 +482,10 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct genl_info *info)
 	__u32 msg_type;
 	struct ipcon_peer_node *self = NULL;
 	struct ipcon_peer_node *ipn = NULL;
-	void *hdr;
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
 		!info->attrs[IPCON_ATTR_PEER_NAME] ||
+		!info->attrs[IPCON_ATTR_SRC_PEER] ||
 		!info->attrs[IPCON_ATTR_DATA])
 		return -EINVAL;
 
@@ -499,7 +501,7 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct genl_info *info)
 
 	ipd_rd_lock(ipcon_db);
 	do {
-		struct sk_buff *msg = NULL;
+		struct sk_buff *msg = skb_clone(skb, GFP_KERNEL);
 
 		self = ipd_lookup_byport(ipcon_db, info->snd_portid);
 		BUG_ON(!self);
@@ -511,37 +513,14 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
-		msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
-		if (!msg) {
-			ret = -ENOMEM;
-			break;
-		}
-
-		hdr = genlmsg_put(msg, 0, 0, &ipcon_fam, 0, IPCON_USR_MSG);
-		if (!hdr) {
-			nlmsg_free(msg);
-			ret = -ENOBUFS;
-			break;
-		}
-
-		nla_put_u32(msg, IPCON_ATTR_MSG_TYPE, IPCON_MSG_UNICAST);
-		nla_put_string(msg, IPCON_ATTR_PEER_NAME, self->name);
-		ret = nla_put(msg, IPCON_ATTR_DATA,
-			nla_len(info->attrs[IPCON_ATTR_DATA]),
-			nla_data(info->attrs[IPCON_ATTR_DATA]));
-
-		if (ret < 0) {
-			genlmsg_cancel(msg, hdr);
-			nlmsg_free(msg);
-			break;
-		}
-
-		genlmsg_end(msg, hdr);
-		ipcon_dbg("Send mesg to %s@%lu\n",
+		ipcon_dbg("Msg %s@%lu --> %s@%lu\n",
+				self->name,
+				(unsigned long)self->port,
 				ipn->name,
 				(unsigned long)ipn->port);
-		ret = genlmsg_unicast(genl_info_net(info),
-				msg, ipn->port);
+
+		ret = genlmsg_unicast(genl_info_net(info), msg,
+				ipn->port);
 
 
 	} while (0);
