@@ -473,6 +473,83 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 	return ret;
 }
 
+static int ipcon_unicast_msg(struct sk_buff *skb, struct genl_info *info)
+{
+	int ret = 0;
+	char name[IPCON_MAX_NAME_LEN];
+	__u32 msg_type;
+	struct ipcon_peer_node *self = NULL;
+	struct ipcon_peer_node *ipn = NULL;
+	void *hdr;
+
+	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
+		!info->attrs[IPCON_ATTR_PEER_NAME] ||
+		!info->attrs[IPCON_ATTR_DATA])
+		return -EINVAL;
+
+	msg_type = nla_get_u32(info->attrs[IPCON_ATTR_MSG_TYPE]);
+	if (msg_type != IPCON_MSG_UNICAST)
+		return -EINVAL;
+
+	nla_strlcpy(name, info->attrs[IPCON_ATTR_PEER_NAME],
+			IPCON_MAX_NAME_LEN);
+
+	if (!strcmp(IPCON_GENL_NAME, name))
+		return -EINVAL;
+
+	ipd_rd_lock(ipcon_db);
+	do {
+		struct sk_buff *msg = NULL;
+
+		self = ipd_lookup_byport(ipcon_db, info->snd_portid);
+		BUG_ON(!self);
+
+		ipn = ipd_lookup_byname(ipcon_db, name);
+		if (!ipn) {
+			ipcon_err("Peer %s not found\n", name);
+			ret = -ENOENT;
+			break;
+		}
+
+		msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
+		if (!msg) {
+			ret = -ENOMEM;
+			break;
+		}
+
+		hdr = genlmsg_put(msg, 0, 0, &ipcon_fam, 0, IPCON_USR_MSG);
+		if (!hdr) {
+			nlmsg_free(msg);
+			ret = -ENOBUFS;
+			break;
+		}
+
+		nla_put_u32(msg, IPCON_ATTR_MSG_TYPE, IPCON_MSG_UNICAST);
+		nla_put_string(msg, IPCON_ATTR_PEER_NAME, self->name);
+		ret = nla_put(msg, IPCON_ATTR_DATA,
+			nla_len(info->attrs[IPCON_ATTR_DATA]),
+			nla_data(info->attrs[IPCON_ATTR_DATA]));
+
+		if (ret < 0) {
+			genlmsg_cancel(msg, hdr);
+			nlmsg_free(msg);
+			break;
+		}
+
+		genlmsg_end(msg, hdr);
+		ipcon_dbg("Send mesg to %s@%lu\n",
+				ipn->name,
+				(unsigned long)ipn->port);
+		ret = genlmsg_unicast(genl_info_net(info),
+				msg, ipn->port);
+
+
+	} while (0);
+	ipd_rd_unlock(ipcon_db);
+
+	return ret;
+}
+
 static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 {
 	int ret = 0;
@@ -650,6 +727,12 @@ static const struct genl_ops ipcon_ops[] = {
 	{
 		.cmd = IPCON_MULTICAST_MSG,
 		.doit = ipcon_multicast_msg,
+		.policy = ipcon_policy,
+		/*.flags = GENL_ADMIN_PERM,*/
+	},
+	{
+		.cmd = IPCON_USR_MSG,
+		.doit = ipcon_unicast_msg,
 		.policy = ipcon_policy,
 		/*.flags = GENL_ADMIN_PERM,*/
 	},
