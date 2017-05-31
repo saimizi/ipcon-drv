@@ -453,7 +453,7 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 		genlmsg_end(msg, hdr);
 		ret = genlmsg_reply(msg, info);
 
-		/*
+		/* FIXME : this is NOT the right place to do it.
 		 * If target group found, Send cached last group message to
 		 * communication port if required. since genlmsg_unicast() will
 		 * consume the skbuff, a copy has to be created before sending.
@@ -463,6 +463,8 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 		if (send_last_msg && igi->last_grp_msg) {
 			skb_get(igi->last_grp_msg);
 			msg = igi->last_grp_msg;
+			if (msg->sk)
+				msg->sk = NULL;
 			genlmsg_unicast(genl_info_net(info), msg, com_port);
 			ipcon_dbg("ipcon_grp_reslove() send last_grp_msg to %lu ret = %d\n",
 					(unsigned long) com_port, ret);
@@ -537,7 +539,6 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 	__u32 msg_type;
 	struct ipcon_peer_node *ipn = NULL;
 	struct ipcon_group_info *igi = NULL;
-	void *hdr;
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
 		!info->attrs[IPCON_ATTR_GRP_NAME] ||
@@ -545,7 +546,7 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 		return -EINVAL;
 
 	msg_type = nla_get_u32(info->attrs[IPCON_ATTR_MSG_TYPE]);
-	if (msg_type != IPCON_MSG_UNICAST)
+	if (msg_type != IPCON_MSG_MULTICAST)
 		return -EINVAL;
 
 	ctrl_port = info->snd_portid;
@@ -557,7 +558,7 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 
 	ipd_wr_lock(ipcon_db);
 	do {
-		struct sk_buff *msg = NULL;
+		struct sk_buff *msg = skb_clone(skb, GFP_KERNEL);
 
 		ipn = ipd_lookup_byport(ipcon_db, ctrl_port);
 		if (!ipn) {
@@ -571,55 +572,18 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
-		msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
-		if (!msg) {
-			ret = -ENOMEM;
+		ret = genlmsg_multicast(&ipcon_fam, msg, ipn->ctrl_port,
+				igi->group, GFP_KERNEL);
+
+		if (ret < 0)
 			break;
-		}
-
-		hdr = genlmsg_put(msg, 0, 0, &ipcon_fam, 0, IPCON_USR_MSG);
-		if (!hdr) {
-			nlmsg_free(msg);
-			ret = -ENOBUFS;
-			break;
-		}
-
-		ret = nla_put_u32(msg, IPCON_ATTR_MSG_TYPE,
-				IPCON_MSG_MULTICAST);
-		if (ret < 0) {
-			genlmsg_cancel(msg, hdr);
-			nlmsg_free(msg);
-			break;
-		}
-
-		ret = nla_put_string(msg, IPCON_ATTR_GRP_NAME, igi->name);
-		if (ret < 0) {
-			genlmsg_cancel(msg, hdr);
-			nlmsg_free(msg);
-			break;
-		}
-
-		ret = nla_put(msg, IPCON_ATTR_DATA,
-				nla_len(info->attrs[IPCON_ATTR_DATA]),
-				nla_data(info->attrs[IPCON_ATTR_DATA]));
-
-		if (ret < 0) {
-			genlmsg_cancel(msg, hdr);
-			nlmsg_free(msg);
-			break;
-		}
-
-		genlmsg_end(msg, hdr);
 
 		/* Caching the last muticast message */
 		if (igi->last_grp_msg)
 			nlmsg_free(igi->last_grp_msg);
 
-		skb_get(msg);
-		igi->last_grp_msg = msg;
+		igi->last_grp_msg = skb_clone(skb, GFP_KERNEL);
 
-		genlmsg_multicast(&ipcon_fam, msg, ipn->ctrl_port,
-				igi->group, GFP_KERNEL);
 
 	} while (0);
 	ipd_wr_unlock(ipcon_db);
