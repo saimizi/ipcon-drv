@@ -189,7 +189,7 @@ struct ipcon_peer_node *ipd_lookup_byport(struct ipcon_peer_db *ipd, u32 port)
 		return NULL;
 
 	hash_for_each_possible(ipd->ipd_port_ht, cur, ipn_hport, port)
-		if (cur->port == port)
+		if (cur->ctrl_port == port)
 			return cur;
 
 	return NULL;
@@ -205,11 +205,11 @@ int ipd_insert(struct ipcon_peer_db *ipd, struct ipcon_peer_node *ipn)
 		return -EINVAL;
 
 	if (ipd_lookup_byname(ipd, ipn->name) ||
-		ipd_lookup_byport(ipd, ipn->port))
+		ipd_lookup_byport(ipd, ipn->ctrl_port))
 		return -EEXIST;
 
 	hash_add(ipd->ipd_name_ht, &ipn->ipn_hname, str2hash(ipn->name));
-	hash_add(ipd->ipd_port_ht, &ipn->ipn_hport, ipn->port);
+	hash_add(ipd->ipd_port_ht, &ipn->ipn_hport, ipn->ctrl_port);
 
 	return 0;
 }

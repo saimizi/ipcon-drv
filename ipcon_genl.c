@@ -250,10 +250,8 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 	__u32 msg_type;
 	struct ipcon_peer_node *ipn = NULL;
 	struct ipcon_group_info *igi = NULL;
-	__u32 port = 0;
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
-		!info->attrs[IPCON_ATTR_PORT] ||
 		!info->attrs[IPCON_ATTR_GRP_NAME])
 		return -EINVAL;
 
@@ -261,7 +259,6 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 	if (msg_type != IPCON_MSG_UNICAST)
 		return -EINVAL;
 
-	port = nla_get_u32(info->attrs[IPCON_ATTR_PORT]);
 	nla_strlcpy(name, info->attrs[IPCON_ATTR_GRP_NAME],
 		IPCON_MAX_NAME_LEN);
 
@@ -277,24 +274,23 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 				IPCON_MAX_GROUP);
 
 		if (id >= IPCON_MAX_GROUP) {
+			ipcon_err("No free group id.");
 			ret = -ENOBUFS;
 			break;
 		}
 
 
-		ipn = ipd_lookup_byport(ipcon_db, port);
+		ipn = ipd_lookup_byport(ipcon_db, info->snd_portid);
 		if (!ipn) {
+			ipcon_err("No port %lu found\n.",
+					(unsigned long)info->snd_portid);
 			ret = -ENOENT;
-			break;
-		}
-
-		if (ipn->ctrl_port != info->snd_portid) {
-			ret = -EPERM;
 			break;
 		}
 
 		igi = ipn_lookup_byname(ipn, name);
 		if (igi) {
+			ipcon_err("Group %s existed.\n", name);
 			ret = -EEXIST;
 			break;
 		}
@@ -331,7 +327,6 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 	int ret = 0;
 	char name[IPCON_MAX_NAME_LEN];
 	__u32 ctrl_port;
-	__u32 port;
 	__u32 msg_type;
 	struct ipcon_peer_node *ipn = NULL;
 	struct ipcon_group_info *igi = NULL;
@@ -341,7 +336,6 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 		struct ipcon_kevent ik;
 
 		if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
-			!info->attrs[IPCON_ATTR_PORT] ||
 			!info->attrs[IPCON_ATTR_GRP_NAME]) {
 			ret = -EINVAL;
 			break;
@@ -354,18 +348,12 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 		}
 
 		ctrl_port = info->snd_portid;
-		port = nla_get_u32(info->attrs[IPCON_ATTR_PORT]);
 		nla_strlcpy(name, info->attrs[IPCON_ATTR_GRP_NAME],
 				IPCON_MAX_NAME_LEN);
 
-		ipn = ipd_lookup_byport(ipcon_db, port);
+		ipn = ipd_lookup_byport(ipcon_db, ctrl_port);
 		if (!ipn) {
 			ret = -ENOENT;
-			break;
-		}
-
-		if (ipn->ctrl_port != ctrl_port) {
-			ret = -EPERM;
 			break;
 		}
 
@@ -490,14 +478,12 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 	int ret = 0;
 	char name[IPCON_MAX_NAME_LEN];
 	__u32 ctrl_port;
-	__u32 port;
 	__u32 msg_type;
 	struct ipcon_peer_node *ipn = NULL;
 	struct ipcon_group_info *igi = NULL;
 	void *hdr;
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
-		!info->attrs[IPCON_ATTR_PORT] ||
 		!info->attrs[IPCON_ATTR_GRP_NAME] ||
 		!info->attrs[IPCON_ATTR_DATA])
 		return -EINVAL;
@@ -507,7 +493,6 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 		return -EINVAL;
 
 	ctrl_port = info->snd_portid;
-	port = nla_get_u32(info->attrs[IPCON_ATTR_PORT]);
 	nla_strlcpy(name, info->attrs[IPCON_ATTR_GRP_NAME],
 			IPCON_MAX_NAME_LEN);
 
@@ -518,14 +503,9 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 	do {
 		struct sk_buff *msg = NULL;
 
-		ipn = ipd_lookup_byport(ipcon_db, port);
+		ipn = ipd_lookup_byport(ipcon_db, ctrl_port);
 		if (!ipn) {
 			ret = -ENOENT;
-			break;
-		}
-
-		if (ipn->ctrl_port != ctrl_port) {
-			ret = -EPERM;
 			break;
 		}
 
