@@ -47,6 +47,41 @@ static const struct nla_policy ipcon_policy[NUM_IPCON_ATTR] = {
 				.len = IPCON_MAX_NAME_LEN - 1 },
 };
 
+static int ipcon_filter(struct sock *dsk, struct sk_buff *skb, void *data)
+{
+	return 0;
+}
+
+static int ipcon_multicast(struct sk_buff *skb, u32 port, unsigned int group,
+		gfp_t flags)
+{
+	int ret = 0;
+	struct genl_family *family = &ipcon_fam;
+	struct net *net = &init_net;
+
+
+	do {
+		if (WARN_ON_ONCE(group >= family->n_mcgrps)) {
+			ret = -EINVAL;
+			break;
+		}
+
+		group += family->mcgrp_offset;
+		NETLINK_CB(skb).dst_group = group;
+
+		ret = netlink_broadcast_filtered(net->genl_sock,
+				skb,
+				port,
+				group,
+				flags,
+				ipcon_filter,
+				NULL);
+
+	} while (0);
+
+	return ret;
+}
+
 static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags, int lock)
 {
 	int ret = 0;
@@ -117,8 +152,7 @@ static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags, int lock)
 		if (lock)
 			ipd_wr_unlock(ipcon_db);
 
-		genlmsg_multicast(&ipcon_fam, msg, 0,
-					IPCON_KERNEL_GROUP_PORT, flags);
+		ipcon_multicast(msg, 0, IPCON_KERNEL_GROUP_PORT, flags);
 
 	} while (0);
 }
@@ -559,8 +593,8 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
-		ret = genlmsg_multicast(&ipcon_fam, msg, ipn->ctrl_port,
-				igi->group, GFP_KERNEL);
+		ret = ipcon_multicast(msg, ipn->ctrl_port, igi->group,
+				GFP_KERNEL);
 
 		if (ret < 0)
 			break;
