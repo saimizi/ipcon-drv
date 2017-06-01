@@ -4,6 +4,7 @@ ifneq ($(KERNELRELEASE),)
 
 obj-m := ipcon.o
 ipcon-objs := main.o ipcon_genl.o ipcon_db.o
+EXTRA_CFLAGS += -I@ksrc@/net/netlink
 
 #ifeq ($(CONFIG_DEBUG_FS),y)
 #ipcon-objs += ipcon_debugfs.o

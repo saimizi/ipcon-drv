@@ -8,6 +8,8 @@
 #include <net/genetlink.h>
 #include <asm/bitops.h>
 
+#include "af_netlink.h"
+
 #include "ipcon.h"
 #include "ipcon_genl.h"
 #include "ipcon_db.h"
@@ -49,6 +51,17 @@ static const struct nla_policy ipcon_policy[NUM_IPCON_ATTR] = {
 
 static int ipcon_filter(struct sock *dsk, struct sk_buff *skb, void *data)
 {
+	struct ipcon_peer_node *ipn = NULL;
+
+	ipn = ipd_lookup_byport(ipcon_db, nlk_sk(dsk)->portid);
+	if (!ipn) {
+		ipcon_info("Drop multicast msg to suspicious port %lu\n",
+			(unsigned long)nlk_sk(dsk)->portid);
+		return 1;
+	}
+
+	ipcon_info("muliticast msg to %s\n", ipn->name);
+
 	return 0;
 }
 
