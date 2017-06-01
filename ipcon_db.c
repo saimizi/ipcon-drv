@@ -64,6 +64,7 @@ struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port,
 	hash_init(ipn->ipn_name_ht);
 	INIT_HLIST_NODE(&ipn->ipn_hname);
 	INIT_HLIST_NODE(&ipn->ipn_hport);
+	INIT_HLIST_NODE(&ipn->ipn_hcport);
 	strcpy(ipn->name, name);
 
 	return ipn;
@@ -149,6 +150,9 @@ void ipn_del(struct ipcon_peer_node *ipn)
 
 	if (hash_hashed(&ipn->ipn_hport))
 		hash_del(&ipn->ipn_hport);
+
+	if (hash_hashed(&ipn->ipn_hcport))
+		hash_del(&ipn->ipn_hcport);
 }
 
 struct ipcon_peer_db *ipd_alloc(gfp_t flag)
@@ -162,6 +166,7 @@ struct ipcon_peer_db *ipd_alloc(gfp_t flag)
 	rwlock_init(&ipd->lock);
 	hash_init(ipd->ipd_name_ht);
 	hash_init(ipd->ipd_port_ht);
+	hash_init(ipd->ipd_cport_ht);
 	memset(ipd->group_bitmap, 0, sizeof(ipd->group_bitmap));
 
 	return ipd;
@@ -189,6 +194,20 @@ struct ipcon_peer_node *ipd_lookup_byport(struct ipcon_peer_db *ipd, u32 port)
 		return NULL;
 
 	hash_for_each_possible(ipd->ipd_port_ht, cur, ipn_hport, port)
+		if (cur->port == port)
+			return cur;
+
+	return NULL;
+}
+
+struct ipcon_peer_node *ipd_lookup_bycport(struct ipcon_peer_db *ipd, u32 port)
+{
+	struct ipcon_peer_node *cur = NULL;
+
+	if (!ipd)
+		return NULL;
+
+	hash_for_each_possible(ipd->ipd_cport_ht, cur, ipn_hcport, port)
 		if (cur->ctrl_port == port)
 			return cur;
 
@@ -201,15 +220,19 @@ int ipd_insert(struct ipcon_peer_db *ipd, struct ipcon_peer_node *ipn)
 	if (!ipd || !ipn)
 		return -EINVAL;
 
-	if (hash_hashed(&ipn->ipn_hname) || hash_hashed(&ipn->ipn_hport))
+	if (hash_hashed(&ipn->ipn_hname) ||
+		hash_hashed(&ipn->ipn_hcport) ||
+		hash_hashed(&ipn->ipn_hport))
 		return -EINVAL;
 
 	if (ipd_lookup_byname(ipd, ipn->name) ||
-		ipd_lookup_byport(ipd, ipn->ctrl_port))
+		ipd_lookup_bycport(ipd, ipn->ctrl_port) ||
+		ipd_lookup_byport(ipd, ipn->port))
 		return -EEXIST;
 
 	hash_add(ipd->ipd_name_ht, &ipn->ipn_hname, str2hash(ipn->name));
-	hash_add(ipd->ipd_port_ht, &ipn->ipn_hport, ipn->ctrl_port);
+	hash_add(ipd->ipd_port_ht, &ipn->ipn_hport, ipn->port);
+	hash_add(ipd->ipd_cport_ht, &ipn->ipn_hcport, ipn->ctrl_port);
 
 	return 0;
 }
@@ -227,6 +250,7 @@ void ipd_free(struct ipcon_peer_db *ipd)
 			hash_for_each(ipd->ipd_port_ht, bkt, ipn, ipn_hport)
 				ipn_free(ipn);
 
+		BUG_ON(!hash_empty(ipd->ipd_cport_ht));
 		BUG_ON(!hash_empty(ipd->ipd_name_ht));
 
 		kfree(ipd);

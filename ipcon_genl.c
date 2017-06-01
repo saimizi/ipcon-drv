@@ -177,6 +177,10 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 		return NOTIFY_DONE;
 
 	ipd_wr_lock(ipcon_db);
+	/*
+	 * Since both ctrl port and com port resides in a single
+	 * peer, only use com port can remove peer node (ipn).
+	 */
 	ipn = ipd_lookup_byport(ipcon_db, (u32)n->portid);
 	if (ipn) {
 		ipn_del(ipn);
@@ -307,7 +311,7 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 		}
 
 
-		ipn = ipd_lookup_byport(ipcon_db, info->snd_portid);
+		ipn = ipd_lookup_bycport(ipcon_db, info->snd_portid);
 		if (!ipn) {
 			ipcon_err("No port %lu found\n.",
 					(unsigned long)info->snd_portid);
@@ -376,7 +380,7 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 		nla_strlcpy(name, info->attrs[IPCON_ATTR_GRP_NAME],
 				IPCON_MAX_NAME_LEN);
 
-		ipn = ipd_lookup_byport(ipcon_db, ctrl_port);
+		ipn = ipd_lookup_bycport(ipcon_db, ctrl_port);
 		if (!ipn) {
 			ret = -ENOENT;
 			break;
@@ -526,7 +530,7 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct genl_info *info)
 	do {
 		struct sk_buff *msg = skb_clone(skb, GFP_KERNEL);
 
-		self = ipd_lookup_byport(ipcon_db, info->snd_portid);
+		self = ipd_lookup_bycport(ipcon_db, info->snd_portid);
 		BUG_ON(!self);
 
 		ipn = ipd_lookup_byname(ipcon_db, name);
@@ -581,7 +585,7 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 	do {
 		struct sk_buff *msg = skb_clone(skb, GFP_KERNEL);
 
-		ipn = ipd_lookup_byport(ipcon_db, ctrl_port);
+		ipn = ipd_lookup_bycport(ipcon_db, ctrl_port);
 		if (!ipn) {
 			ret = -ENOENT;
 			break;

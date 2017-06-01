@@ -35,6 +35,7 @@ struct ipcon_peer_node {
 	DECLARE_HASHTABLE(ipn_group_ht, IPN_HASH_BIT);
 	struct hlist_node ipn_hname;
 	struct hlist_node ipn_hport;
+	struct hlist_node ipn_hcport;
 };
 
 #define IPD_HASH_BIT	10
@@ -44,6 +45,7 @@ struct ipcon_peer_db {
 	unsigned long group_bitmap[BITS_TO_LONGS(IPCON_MAX_GROUP)];
 	DECLARE_HASHTABLE(ipd_name_ht, IPD_HASH_BIT);
 	DECLARE_HASHTABLE(ipd_port_ht, IPD_HASH_BIT);
+	DECLARE_HASHTABLE(ipd_cport_ht, IPD_HASH_BIT);
 };
 
 static inline unsigned long str2hash(char *s)
@@ -126,6 +128,10 @@ struct ipcon_peer_node *ipd_lookup_byname(struct ipcon_peer_db *ipd,
 					char *name);
 struct ipcon_peer_node *ipd_lookup_byport(struct ipcon_peer_db *ipd,
 					u32 port);
+
+struct ipcon_peer_node *ipd_lookup_bycport(struct ipcon_peer_db *ipd,
+					u32 port);
+
 int ipd_insert(struct ipcon_peer_db *ipd, struct ipcon_peer_node *ipn);
 void ipd_free(struct ipcon_peer_db *ipd);
 
