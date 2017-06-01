@@ -26,7 +26,7 @@ static struct ipcon_peer_db *ipcon_db;
 
 static struct genl_family ipcon_fam = {
 	.id = GENL_ID_GENERATE,
-	.name = IPCON_GENL_NAME,
+	.name = IPCON_NAME,
 	.hdrsize = IPCON_HDR_SIZE,
 	.version = 1,
 	.maxattr = IPCON_ATTR_MAX,
@@ -153,22 +153,17 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 				unreg_group(ipcon_db, igi->group);
 
 				ik.type = IPCON_EVENT_GRP_REMOVE;
+				strcpy(ik.group.name, igi->name);
+				strcpy(ik.group.peer_name, ipn->name);
 
-				strcpy(ik.grp.group_name, igi->name);
-				ik.grp.group = igi->group +
-					ipcon_fam.mcgrp_offset;
-				strcpy(ik.grp.peer_name, ipn->name);
-				ik.grp.port = ipn->port;
 				ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
 
 				igi_free(igi);
 			}
 		}
 
-		memset(&ik, 0, sizeof(ik));
 		ik.type = IPCON_EVENT_PEER_REMOVE;
 		strcpy(ik.peer.name, ipn->name);
-		ik.peer.port = ipn->port;
 		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
 
 		ipn_free(ipn);
@@ -308,10 +303,8 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 		reg_group(ipcon_db, id);
 
 		ik.type = IPCON_EVENT_GRP_ADD;
-		strcpy(ik.grp.group_name, name);
-		ik.grp.group = igi->group + ipcon_fam.mcgrp_offset;
-		strcpy(ik.grp.peer_name, ipn->name);
-		ik.grp.port = ipn->port;
+		strcpy(ik.group.name, name);
+		strcpy(ik.group.peer_name, ipn->name);
 		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
 
 	} while (0);
@@ -364,10 +357,8 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 		igi_del(igi);
 
 		ik.type = IPCON_EVENT_GRP_REMOVE;
-		strcpy(ik.grp.group_name, name);
-		ik.grp.group = igi->group + ipcon_fam.mcgrp_offset;
-		strcpy(ik.grp.peer_name, ipn->name);
-		ik.grp.port = ipn->port;
+		strcpy(ik.group.name, name);
+		strcpy(ik.group.peer_name, ipn->name);
 		ipcon_send_kevent(&ik, GFP_KERNEL, 0);
 
 		igi_free(igi);
@@ -494,7 +485,7 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct genl_info *info)
 	nla_strlcpy(name, info->attrs[IPCON_ATTR_PEER_NAME],
 			IPCON_MAX_NAME_LEN);
 
-	if (!strcmp(IPCON_GENL_NAME, name))
+	if (!strcmp(IPCON_NAME, name))
 		return -EINVAL;
 
 	ipd_rd_lock(ipcon_db);
@@ -628,7 +619,6 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 		memset(&ik, 0, sizeof(ik));
 		ik.type = IPCON_EVENT_PEER_ADD;
 		strcpy(ik.peer.name, ipn->name);
-		ik.peer.port = ipn->port;
 		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
 
 	} while (0);
@@ -699,7 +689,7 @@ static int ipcon_kernel_init(void)
 	if (!igi)
 		return -ENOMEM;
 
-	ipn = ipn_alloc(0, 0, IPCON_GENL_NAME, GFP_KERNEL);
+	ipn = ipn_alloc(0, 0, IPCON_NAME, GFP_KERNEL);
 	if (!ipn) {
 		igi_free(igi);
 		return -ENOMEM;

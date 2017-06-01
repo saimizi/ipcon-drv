@@ -7,7 +7,7 @@
 
 #include <linux/genetlink.h>
 
-#define IPCON_GENL_NAME		"ipcon"
+#define IPCON_NAME		"ipcon"
 #define IPCON_KERNEL_GROUP	"ipcon_kevent"
 #define IPCON_MAX_NAME_LEN	64
 #define IPCON_MAX_GROUP		48
@@ -79,14 +79,11 @@ struct ipcon_kevent {
 	enum ipcon_kevent_type type;
 	union {
 		struct {
-			char group_name[IPCON_MAX_NAME_LEN];
-			__u32 group;
+			char name[IPCON_MAX_NAME_LEN];
 			char peer_name[IPCON_MAX_NAME_LEN];
-			__u32 port;
-		} grp;
+		} group;
 		struct {
 			char name[IPCON_MAX_NAME_LEN];
-			__u32 port;
 		} peer;
 	};
 };
