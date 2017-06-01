@@ -182,20 +182,20 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 }
 
 
-static int ipcon_srv_reslove(struct sk_buff *skb, struct genl_info *info)
+static int ipcon_peer_reslove(struct sk_buff *skb, struct genl_info *info)
 {
 	int ret = 0;
 	char name[IPCON_MAX_NAME_LEN];
-	__u32 port = 0;
 	__u32 msg_type;
 	struct ipcon_peer_node *ipn = NULL;
 	void *hdr;
+	int flag = 0;
 
 	do {
 		struct sk_buff *msg;
 
 		if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
-			!info->attrs[IPCON_ATTR_SRV_NAME]) {
+			!info->attrs[IPCON_ATTR_PEER_NAME]) {
 			ret = -EINVAL;
 			break;
 		}
@@ -206,19 +206,14 @@ static int ipcon_srv_reslove(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
-		nla_strlcpy(name, info->attrs[IPCON_ATTR_SRV_NAME],
+		nla_strlcpy(name, info->attrs[IPCON_ATTR_PEER_NAME],
 				IPCON_MAX_NAME_LEN);
 
 		ipd_rd_lock(ipcon_db);
 		ipn = ipd_lookup_byname(ipcon_db, name);
 		if (ipn)
-			port = ipn->port;
+			flag = 1;
 		ipd_rd_unlock(ipcon_db);
-
-		if (!port) {
-			ret = -ENOENT;
-			break;
-		}
 
 		msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
 		if (!msg) {
@@ -226,7 +221,7 @@ static int ipcon_srv_reslove(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
-		hdr = genlmsg_put(msg, 0, 0, &ipcon_fam, 0, IPCON_SRV_RESLOVE);
+		hdr = genlmsg_put(msg, 0, 0, &ipcon_fam, 0, IPCON_PEER_RESLOVE);
 
 		if (!hdr) {
 			nlmsg_free(msg);
@@ -235,7 +230,8 @@ static int ipcon_srv_reslove(struct sk_buff *skb, struct genl_info *info)
 		}
 
 		nla_put_u32(msg, IPCON_ATTR_MSG_TYPE, IPCON_MSG_UNICAST);
-		nla_put_u32(msg, IPCON_ATTR_PORT, port);
+		if (flag)
+			nla_put_flag(msg, IPCON_ATTR_FLAG);
 		genlmsg_end(msg, hdr);
 
 		ret = genlmsg_reply(msg, info);
@@ -644,8 +640,8 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 
 static const struct genl_ops ipcon_ops[] = {
 	{
-		.cmd = IPCON_SRV_RESLOVE,
-		.doit = ipcon_srv_reslove,
+		.cmd = IPCON_PEER_RESLOVE,
+		.doit = ipcon_peer_reslove,
 		.policy = ipcon_policy,
 		/*.flags = GENL_ADMIN_PERM,*/
 	},
