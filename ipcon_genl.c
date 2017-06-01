@@ -55,12 +55,14 @@ static int ipcon_filter(struct sock *dsk, struct sk_buff *skb, void *data)
 
 	ipn = ipd_lookup_byport(ipcon_db, nlk_sk(dsk)->portid);
 	if (!ipn) {
-		ipcon_info("Drop multicast msg to suspicious port %lu\n",
+		ipcon_warn("Drop multicast msg to suspicious port %lu\n",
 			(unsigned long)nlk_sk(dsk)->portid);
 		return 1;
 	}
 
-	ipcon_info("muliticast msg to %s\n", ipn->name);
+	ipcon_dbg("Multicast to %s@%lu.\n",
+			ipn->name,
+			(unsigned long)ipn->port);
 
 	return 0;
 }
@@ -202,6 +204,9 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 			hash_for_each(ipn->ipn_group_ht, bkt, igi, igi_hgroup) {
 				igi_del(igi);
 				unreg_group(ipcon_db, igi->group);
+
+				ipcon_dbg("Group %s.%s@%d removed.\n",
+					ipn->name, igi->name, igi->group);
 
 				ik.type = IPCON_EVENT_GRP_REMOVE;
 				strcpy(ik.group.name, igi->name);
@@ -352,6 +357,8 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 		}
 
 		reg_group(ipcon_db, id);
+		ipcon_dbg("Group %s.%s@%d registered.\n",
+				ipn->name, igi->name, id);
 
 		ik.type = IPCON_EVENT_GRP_ADD;
 		strcpy(ik.group.name, name);
@@ -404,7 +411,10 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 			ret = -ENOENT;
 			break;
 		}
+		ipcon_dbg("Group %s.%s@%d removed.\n",
+				ipn->name, igi->name, igi->group);
 
+		unreg_group(ipcon_db, igi->group);
 		igi_del(igi);
 
 		ik.type = IPCON_EVENT_GRP_REMOVE;
@@ -426,15 +436,14 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 	char name[IPCON_MAX_NAME_LEN];
 	char srvname[IPCON_MAX_NAME_LEN];
 	__u32 ctrl_port;
-	__u32 com_port;
 	__u32 msg_type;
 	struct ipcon_peer_node *ipn = NULL;
+	struct ipcon_peer_node *self = NULL;
 	struct ipcon_group_info *igi = NULL;
 	void *hdr;
 	int send_last_msg = 0;
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
-		!info->attrs[IPCON_ATTR_PORT] ||
 		!info->attrs[IPCON_ATTR_SRV_NAME] ||
 		!info->attrs[IPCON_ATTR_GRP_NAME])
 		return  -EINVAL;
@@ -444,7 +453,6 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 	if (msg_type != IPCON_MSG_UNICAST)
 		return -EINVAL;
 
-	com_port = nla_get_u32(info->attrs[IPCON_ATTR_PORT]);
 	nla_strlcpy(name, info->attrs[IPCON_ATTR_GRP_NAME],
 			IPCON_MAX_NAME_LEN);
 
@@ -458,6 +466,9 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 
 	do {
 		struct sk_buff *msg;
+
+		self = ipd_lookup_bycport(ipcon_db, info->snd_portid);
+		BUG_ON(!self);
 
 		ipn = ipd_lookup_byname(ipcon_db, srvname);
 		if (!ipn) {
@@ -503,9 +514,12 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 			msg = igi->last_grp_msg;
 			if (msg->sk)
 				msg->sk = NULL;
-			genlmsg_unicast(genl_info_net(info), msg, com_port);
-			ipcon_dbg("ipcon_grp_reslove() send last_grp_msg to %lu ret = %d\n",
-					(unsigned long) com_port, ret);
+			genlmsg_unicast(genl_info_net(info), msg, self->port);
+			ipcon_dbg("Send last msg of %s.%s to %s@%lu.\n",
+					ipn->name,
+					igi->name,
+					self->name,
+					(unsigned long) self->port);
 		}
 
 	} while (0);
@@ -610,17 +624,24 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
+		ipcon_dbg("Send msg to group %s.%s.\n",
+				ipn->name, igi->name);
+
 		ret = ipcon_multicast(msg, ipn->ctrl_port, igi->group,
 				GFP_KERNEL);
 
 		if (ret < 0)
 			break;
 
+		ipcon_dbg("Update last msg of %s.%s.\n",
+				ipn->name, igi->name);
+
 		/* Caching the last muticast message */
 		if (igi->last_grp_msg)
 			nlmsg_free(igi->last_grp_msg);
 
 		igi->last_grp_msg = skb_clone(skb, GFP_KERNEL);
+
 
 
 	} while (0);
