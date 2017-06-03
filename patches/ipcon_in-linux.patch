@@ -1,18 +1,18 @@
 diff -uNr linux-4.7.2.org/net/netlink/Makefile linux-4.7.2/net/netlink/Makefile
---- linux-4.7.2.org/net/netlink/Makefile	2017-06-03 10:20:39.717546415 +0900
-+++ linux-4.7.2/net/netlink/Makefile	2017-06-03 10:22:49.512134715 +0900
+--- linux-4.7.2.org/net/netlink/Makefile	2017-06-03 10:55:23.396898426 +0900
++++ linux-4.7.2/net/netlink/Makefile	2017-06-03 10:50:45.587407122 +0900
 @@ -2,7 +2,7 @@
  # Makefile for the netlink driver.
  #
  
 -obj-y  				:= af_netlink.o genetlink.o
-+obj-y  				:= af_netlink.o genetlink.o ipcon.o
++obj-y  				:= af_netlink.o genetlink.o ipcon_in.o
  
  obj-$(CONFIG_NETLINK_DIAG)	+= netlink_diag.o
  netlink_diag-y			:= diag.o
 diff -uNr linux-4.7.2.org/net/netlink/ipcon_in.c linux-4.7.2/net/netlink/ipcon_in.c
 --- linux-4.7.2.org/net/netlink/ipcon_in.c	1970-01-01 09:00:00.000000000 +0900
-+++ linux-4.7.2/net/netlink/ipcon_in.c	2017-06-03 10:17:05.425598186 +0900
++++ linux-4.7.2/net/netlink/ipcon_in.c	2017-06-03 10:45:20.141454032 +0900
 @@ -0,0 +1,17 @@
 +#include <net/genetlink.h>
 +#include "af_netlink.h"
@@ -33,7 +33,7 @@ diff -uNr linux-4.7.2.org/net/netlink/ipcon_in.c linux-4.7.2/net/netlink/ipcon_i
 +EXPORT_SYMBOL(ipcon_clear_multicast_user);
 diff -uNr linux-4.7.2.org/net/netlink/ipcon_in.h linux-4.7.2/net/netlink/ipcon_in.h
 --- linux-4.7.2.org/net/netlink/ipcon_in.h	1970-01-01 09:00:00.000000000 +0900
-+++ linux-4.7.2/net/netlink/ipcon_in.h	2017-06-03 10:17:11.053700722 +0900
++++ linux-4.7.2/net/netlink/ipcon_in.h	2017-06-03 10:45:20.141454032 +0900
 @@ -0,0 +1,6 @@
 +#ifndef __IPCON_IN_H__
 +#define __IPCON_IN_H__
