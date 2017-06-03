@@ -9,6 +9,7 @@
 #include <asm/bitops.h>
 
 #include "af_netlink.h"
+#include "ipcon_in.h"
 
 #include "ipcon.h"
 #include "ipcon_genl.h"
@@ -73,7 +74,7 @@ static int ipcon_multicast(struct sk_buff *skb, u32 port, unsigned int group,
 	int ret = 0;
 	struct genl_family *family = &ipcon_fam;
 	struct net *net = &init_net;
-
+	int real_group = group + family->mcgrp_offset;
 
 	do {
 		if (WARN_ON_ONCE(group >= family->n_mcgrps)) {
@@ -81,13 +82,18 @@ static int ipcon_multicast(struct sk_buff *skb, u32 port, unsigned int group,
 			break;
 		}
 
-		group += family->mcgrp_offset;
-		NETLINK_CB(skb).dst_group = group;
+		/* if no listener, just return as 0 */
+		if (!netlink_has_listeners(net->genl_sock, real_group)) {
+			ipcon_dbg("%s: No listener in group %d\n",
+				__func__, group);
+			break;
+		}
 
+		NETLINK_CB(skb).dst_group = group;
 		ret = netlink_broadcast_filtered(net->genl_sock,
 				skb,
 				port,
-				group,
+				real_group,
 				flags,
 				ipcon_filter,
 				NULL);
@@ -97,7 +103,8 @@ static int ipcon_multicast(struct sk_buff *skb, u32 port, unsigned int group,
 	return ret;
 }
 
-static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags, int lock)
+/* ipcon_send_kevent should be called with write lock of ipcon_db */
+static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags)
 {
 	int ret = 0;
 	struct sk_buff *msg = NULL;
@@ -144,14 +151,6 @@ static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags, int lock)
 
 		genlmsg_end(msg, hdr);
 
-		/*
-		 * ipcon_kevent() will be called from different context in which
-		 * cp_grptree_root lock maybe locked or not locked. so do lock
-		 * according to the caller setting.
-		 */
-		if (lock)
-			ipd_wr_lock(ipcon_db);
-
 		igi = ipd_get_igi(ipcon_db, 0, IPCON_KERNEL_GROUP_PORT);
 		if (!igi)
 			BUG();
@@ -164,12 +163,15 @@ static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags, int lock)
 		skb_get(msg);
 		igi->last_grp_msg = msg;
 
-		if (lock)
-			ipd_wr_unlock(ipcon_db);
-
 		ipcon_multicast(msg, 0, IPCON_KERNEL_GROUP_PORT, flags);
 
 	} while (0);
+}
+
+static void unreg_group_safe(int group)
+{
+	unreg_group(ipcon_db, group);
+	ipcon_clear_multicast_user(&ipcon_fam, group);
 }
 
 /*
@@ -203,7 +205,7 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 		if (!hash_empty(ipn->ipn_group_ht)) {
 			hash_for_each(ipn->ipn_group_ht, bkt, igi, igi_hgroup) {
 				igi_del(igi);
-				unreg_group(ipcon_db, igi->group);
+				unreg_group_safe(igi->group);
 
 				ipcon_dbg("Group %s.%s@%d removed.\n",
 					ipn->name, igi->name, igi->group);
@@ -212,7 +214,7 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 				strcpy(ik.group.name, igi->name);
 				strcpy(ik.group.peer_name, ipn->name);
 
-				ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
+				ipcon_send_kevent(&ik, GFP_ATOMIC);
 
 				igi_free(igi);
 			}
@@ -220,7 +222,7 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 
 		ik.type = IPCON_EVENT_PEER_REMOVE;
 		strcpy(ik.peer.name, ipn->name);
-		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
+		ipcon_send_kevent(&ik, GFP_ATOMIC);
 
 		ipn_free(ipn);
 
@@ -333,7 +335,7 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 		if (!ipn) {
 			ipcon_err("No port %lu found\n.",
 					(unsigned long)info->snd_portid);
-			ret = -ENOENT;
+			ret = -ESRCH;
 			break;
 		}
 
@@ -363,7 +365,7 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 		ik.type = IPCON_EVENT_GRP_ADD;
 		strcpy(ik.group.name, name);
 		strcpy(ik.group.peer_name, ipn->name);
-		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
+		ipcon_send_kevent(&ik, GFP_ATOMIC);
 
 	} while (0);
 	ipd_wr_unlock(ipcon_db);
@@ -402,25 +404,25 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 
 		ipn = ipd_lookup_bycport(ipcon_db, ctrl_port);
 		if (!ipn) {
-			ret = -ENOENT;
+			ret = -ESRCH;
 			break;
 		}
 
 		igi = ipn_lookup_byname(ipn, name);
 		if (!igi) {
-			ret = -ENOENT;
+			ret = -ESRCH;
 			break;
 		}
 		ipcon_dbg("Group %s.%s@%d removed.\n",
 				ipn->name, igi->name, igi->group);
 
-		unreg_group(ipcon_db, igi->group);
+		unreg_group_safe(igi->group);
 		igi_del(igi);
 
 		ik.type = IPCON_EVENT_GRP_REMOVE;
 		strcpy(ik.group.name, name);
 		strcpy(ik.group.peer_name, ipn->name);
-		ipcon_send_kevent(&ik, GFP_KERNEL, 0);
+		ipcon_send_kevent(&ik, GFP_KERNEL);
 
 		igi_free(igi);
 
@@ -472,13 +474,13 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 
 		ipn = ipd_lookup_byname(ipcon_db, srvname);
 		if (!ipn) {
-			ret = -ENOENT;
+			ret = -ESRCH;
 			break;
 		}
 
 		igi = ipn_lookup_byname(ipn, name);
 		if (!igi) {
-			ret = -ENOENT;
+			ret = -ESRCH;
 			break;
 		}
 
@@ -563,7 +565,7 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct genl_info *info)
 		ipn = ipd_lookup_byname(ipcon_db, name);
 		if (!ipn) {
 			ipcon_err("%s: Peer %s not found.\n", __func__, name);
-			ret = -ENOENT;
+			ret = -ESRCH;
 			break;
 		}
 
@@ -614,13 +616,13 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 
 		ipn = ipd_lookup_bycport(ipcon_db, ctrl_port);
 		if (!ipn) {
-			ret = -ENOENT;
+			ret = -ESRCH;
 			break;
 		}
 
 		igi = ipn_lookup_byname(ipn, name);
 		if (!igi) {
-			ret = -ENOENT;
+			ret = -ESRCH;
 			break;
 		}
 
@@ -691,7 +693,7 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 		memset(&ik, 0, sizeof(ik));
 		ik.type = IPCON_EVENT_PEER_ADD;
 		strcpy(ik.peer.name, ipn->name);
-		ipcon_send_kevent(&ik, GFP_ATOMIC, 0);
+		ipcon_send_kevent(&ik, GFP_ATOMIC);
 
 	} while (0);
 	ipd_wr_unlock(ipcon_db);
