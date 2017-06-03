@@ -1,5 +1,0 @@
-The source in this folder should be placed in 
-
-    linux/kernel/net/netlink/
-
-and be linked to kernel statically.
