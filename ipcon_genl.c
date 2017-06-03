@@ -562,7 +562,7 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct genl_info *info)
 
 		ipn = ipd_lookup_byname(ipcon_db, name);
 		if (!ipn) {
-			ipcon_err("Peer %s not found\n", name);
+			ipcon_err("%s: Peer %s not found.\n", __func__, name);
 			ret = -ENOENT;
 			break;
 		}
