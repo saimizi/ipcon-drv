@@ -46,7 +46,7 @@ void igi_free(struct ipcon_group_info *igi)
 }
 
 struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port,
-		char *name, gfp_t flag)
+		char *name, enum peer_type type, gfp_t flag)
 {
 	struct ipcon_peer_node *ipn;
 
@@ -60,6 +60,7 @@ struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port,
 
 	ipn->port = port;
 	ipn->ctrl_port = ctrl_port;
+	ipn->type = type;
 	hash_init(ipn->ipn_group_ht);
 	hash_init(ipn->ipn_name_ht);
 	INIT_HLIST_NODE(&ipn->ipn_hname);

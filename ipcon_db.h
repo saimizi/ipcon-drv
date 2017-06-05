@@ -31,6 +31,7 @@ struct ipcon_peer_node {
 	char name[IPCON_MAX_NAME_LEN];
 	__u32 port;
 	__u32 ctrl_port;
+	enum peer_type type;
 	DECLARE_HASHTABLE(ipn_name_ht, IPN_HASH_BIT);
 	DECLARE_HASHTABLE(ipn_group_ht, IPN_HASH_BIT);
 	struct hlist_node ipn_hname;
@@ -113,7 +114,7 @@ void igi_del(struct ipcon_group_info *igi);
 void igi_free(struct ipcon_group_info *igi);
 
 struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port,
-				char *name, gfp_t flag);
+				char *name, enum peer_type type, gfp_t flag);
 void ipn_free(struct ipcon_peer_node *ipn);
 struct ipcon_group_info *ipn_lookup_byname(struct ipcon_peer_node *ipn,
 					char *grp_name);

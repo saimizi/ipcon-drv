@@ -39,6 +39,7 @@ enum {
 	IPCON_ATTR_FLAG,
 	IPCON_ATTR_PEER_NAME,
 	IPCON_ATTR_SRC_PEER,
+	IPCON_ATTR_PEER_TYPE,
 	/* Add attr here */
 
 	IPCON_ATTR_AFTER_LAST,
@@ -56,6 +57,14 @@ enum {
 	IPCON_MULTICAST_MSG,
 	IPCON_USR_MSG,
 	IPCON_CMD_MAX,
+};
+
+enum peer_type {
+	ANON,
+	PUBLISHER,
+	SERVICE,
+	SERVICE_PUBLISHER,
+	MAX_PEER_TYPE
 };
 
 static inline int valid_ipcon_group(__u32 group)

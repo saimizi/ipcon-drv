@@ -19,6 +19,7 @@
 #include "ipcon_debugfs.h"
 #endif
 
+
 /* Reference
  * - inclue/net/netlink.h
  */
@@ -48,7 +49,30 @@ static const struct nla_policy ipcon_policy[NUM_IPCON_ATTR] = {
 				.len = IPCON_MAX_NAME_LEN - 1 },
 	[IPCON_ATTR_SRC_PEER] = {.type = NLA_NUL_STRING,
 				.len = IPCON_MAX_NAME_LEN - 1 },
+	[IPCON_ATTR_PEER_TYPE] = {.type = NLA_U32},
 };
+
+static inline int is_publisher(struct ipcon_peer_node *ipn)
+{
+	return (ipn->type == PUBLISHER ||
+		ipn->type == SERVICE_PUBLISHER);
+}
+
+static inline int is_service(struct ipcon_peer_node *ipn)
+{
+	return (ipn->type == SERVICE ||
+		ipn->type == SERVICE_PUBLISHER);
+}
+
+static inline int is_anon(struct ipcon_peer_node *ipn)
+{
+	return (ipn->type == ANON);
+}
+
+static inline int can_rcv_msg(struct ipcon_peer_node *ipn)
+{
+	return (ipn->type != PUBLISHER);
+}
 
 static int ipcon_filter(struct sock *dsk, struct sk_buff *skb, void *data)
 {
@@ -194,14 +218,20 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 		return NOTIFY_DONE;
 
 	ipd_wr_lock(ipcon_db);
-	/*
-	 * Since both ctrl port and com port resides in a single
-	 * peer, only use com port can remove peer node (ipn).
-	 */
-	ipn = ipd_lookup_byport(ipcon_db, (u32)n->portid);
-	if (ipn) {
-		ipn_del(ipn);
+	do {
+		/*
+		 * Since both ctrl port and com port resides in a single
+		 * peer, only use com port can remove peer node (ipn).
+		 */
+		ipn = ipd_lookup_byport(ipcon_db, (u32)n->portid);
+		if (!ipn)
+			break;
 
+		/* No need notify user space for an anonymous peer */
+		if (is_anon(ipn))
+			break;
+
+		ipn_del(ipn);
 		if (!hash_empty(ipn->ipn_group_ht)) {
 			hash_for_each(ipn->ipn_group_ht, bkt, igi, igi_hgroup) {
 				igi_del(igi);
@@ -220,15 +250,22 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 			}
 		}
 
-		ik.type = IPCON_EVENT_PEER_REMOVE;
-		strcpy(ik.peer.name, ipn->name);
-		ipcon_send_kevent(&ik, GFP_ATOMIC);
+		/*
+		 * Only notify user space for a service peer.
+		 * for a publisher, only group name is meaningful, not peer
+		 * name.
+		 */
+		if (is_service(ipn)) {
+			ik.type = IPCON_EVENT_PEER_REMOVE;
+			strcpy(ik.peer.name, ipn->name);
+			ipcon_send_kevent(&ik, GFP_ATOMIC);
+		}
 
 		ipn_free(ipn);
 
 		/* Decrease reference count */
 		module_put(THIS_MODULE);
-	}
+	} while (0);
 	ipd_wr_unlock(ipcon_db);
 
 	return 0;
@@ -339,6 +376,13 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
+		if (!is_publisher(ipn)) {
+			ipcon_err("%s: %s is not a publisher.\n",
+					__func__, ipn->name);
+			ret = -EPERM;
+			break;
+		}
+
 		igi = ipn_lookup_byname(ipn, name);
 		if (igi) {
 			ipcon_err("Group %s existed.\n", name);
@@ -408,6 +452,13 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
+		if (!is_publisher(ipn)) {
+			ipcon_err("%s: %s is not a publisher.\n",
+					__func__, ipn->name);
+			ret = -EINVAL;
+			break;
+		}
+
 		igi = ipn_lookup_byname(ipn, name);
 		if (!igi) {
 			ret = -ESRCH;
@@ -474,6 +525,13 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 
 		ipn = ipd_lookup_byname(ipcon_db, srvname);
 		if (!ipn) {
+			ret = -ESRCH;
+			break;
+		}
+
+		if (!is_publisher(ipn)) {
+			ipcon_err("%s: %s is not a publisher.\n",
+					__func__, ipn->name);
 			ret = -ESRCH;
 			break;
 		}
@@ -569,6 +627,14 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
+		if (!can_rcv_msg(ipn)) {
+			ipcon_err("%s: %s can not receive mesage.\n",
+					__func__, ipn->name);
+
+			ret = -EPERM;
+			break;
+		}
+
 		ipcon_dbg("Msg %s@%lu --> %s@%lu\n",
 				self->name,
 				(unsigned long)self->port,
@@ -620,6 +686,13 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
+		if (!is_publisher(ipn)) {
+			ipcon_err("%s: %s is not a publisher.\n",
+					__func__, ipn->name);
+			ret = -EPERM;
+			break;
+		}
+
 		igi = ipn_lookup_byname(ipn, name);
 		if (!igi) {
 			ret = -ESRCH;
@@ -658,21 +731,37 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 	char name[IPCON_MAX_NAME_LEN];
 	int ret = 0;
 	struct ipcon_peer_node *ipn = NULL;
-	__u32 port = 0;
+	u32 port = 0;
 	struct ipcon_kevent ik;
+	u32 peer_type = 0;
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
 		!info->attrs[IPCON_ATTR_PORT] ||
+		!info->attrs[IPCON_ATTR_PEER_TYPE] ||
 		!info->attrs[IPCON_ATTR_PEER_NAME])
 		return -EINVAL;
 
 	ipd_wr_lock(ipcon_db);
 	do {
 		port = nla_get_u32(info->attrs[IPCON_ATTR_PORT]);
+		if (!port) {
+			ret = -EINVAL;
+			break;
+		}
+
 		nla_strlcpy(name, info->attrs[IPCON_ATTR_PEER_NAME],
 				IPCON_MAX_NAME_LEN);
 
-		ipn = ipn_alloc(port, info->snd_portid, name, GFP_KERNEL);
+		peer_type = nla_get_u32(info->attrs[IPCON_ATTR_PEER_TYPE]);
+		if (peer_type >= (u32)MAX_PEER_TYPE) {
+			ret = -EINVAL;
+			ipcon_dbg("%s: Invalid peer type %lu.\n",
+				__func__, (unsigned long)peer_type);
+			break;
+		}
+
+		ipn = ipn_alloc(port, info->snd_portid, name,
+				(enum peer_type)peer_type, GFP_KERNEL);
 		if (!ipn) {
 			ret = -ENOMEM;
 			break;
@@ -690,10 +779,12 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
-		memset(&ik, 0, sizeof(ik));
-		ik.type = IPCON_EVENT_PEER_ADD;
-		strcpy(ik.peer.name, ipn->name);
-		ipcon_send_kevent(&ik, GFP_ATOMIC);
+		if (is_service(ipn)) {
+			memset(&ik, 0, sizeof(ik));
+			ik.type = IPCON_EVENT_PEER_ADD;
+			strcpy(ik.peer.name, ipn->name);
+			ipcon_send_kevent(&ik, GFP_ATOMIC);
+		}
 
 	} while (0);
 	ipd_wr_unlock(ipcon_db);
@@ -763,7 +854,7 @@ static int ipcon_kernel_init(void)
 	if (!igi)
 		return -ENOMEM;
 
-	ipn = ipn_alloc(0, 0, IPCON_NAME, GFP_KERNEL);
+	ipn = ipn_alloc(0, 0, IPCON_NAME, SERVICE_PUBLISHER, GFP_KERNEL);
 	if (!ipn) {
 		igi_free(igi);
 		return -ENOMEM;
