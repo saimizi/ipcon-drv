@@ -18,4 +18,11 @@
 	pr_debug("[ipcon] %s-%d " fmt, __func__, __LINE__, ##__VA_ARGS__)
 
 
+#ifdef DEBUG_LOCK
+#define ipcon_dbg_lock(fmt, ...) \
+	pr_err("[ipcon] %s-%d " fmt, __func__, __LINE__, ##__VA_ARGS__)
+#else
+#define ipcon_dbg_lock(a)
+#endif
+
 #endif

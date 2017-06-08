@@ -28,6 +28,9 @@ struct ipcon_group_info *igi_alloc(char *name, unsigned int group, gfp_t flag)
 
 void igi_del(struct ipcon_group_info *igi)
 {
+	if (!igi)
+		return;
+
 	if (hash_hashed(&igi->igi_hname))
 		hash_del(&igi->igi_hname);
 
@@ -58,6 +61,7 @@ struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port,
 	if (!ipn)
 		return NULL;
 
+	rwlock_init(&ipn->lock);
 	ipn->port = port;
 	ipn->ctrl_port = ctrl_port;
 	ipn->type = type;
@@ -146,6 +150,9 @@ int ipn_insert(struct ipcon_peer_node *ipn, struct ipcon_group_info *igi)
 
 void ipn_del(struct ipcon_peer_node *ipn)
 {
+	if (!ipn)
+		return;
+
 	if (hash_hashed(&ipn->ipn_hname))
 		hash_del(&ipn->ipn_hname);
 
@@ -164,11 +171,30 @@ struct ipcon_peer_db *ipd_alloc(gfp_t flag)
 	if (!ipd)
 		return NULL;
 
+	memset((char *)ipd->group_bitmap, 0, sizeof(ipd->group_bitmap));
+	rwlock_init(&ipd->group_bitmap_lock);
 	rwlock_init(&ipd->lock);
 	hash_init(ipd->ipd_name_ht);
 	hash_init(ipd->ipd_port_ht);
 	hash_init(ipd->ipd_cport_ht);
-	memset(ipd->group_bitmap, 0, sizeof(ipd->group_bitmap));
+
+	do {
+		ipd->mc_wq = create_workqueue("ipcon_muticast");
+		if (!ipd->mc_wq) {
+			kfree(ipd);
+			ipd = NULL;
+			break;
+
+		}
+
+		ipd->notify_wq = create_workqueue("ipcon_notify");
+		if (!ipd->notify_wq) {
+			destroy_workqueue(ipd->mc_wq);
+			kfree(ipd);
+			ipd = NULL;
+		}
+
+	} while (0);
 
 	return ipd;
 }
@@ -247,12 +273,20 @@ void ipd_free(struct ipcon_peer_db *ipd)
 		struct ipcon_peer_node *ipn;
 		unsigned long bkt;
 
+		flush_workqueue(ipd->notify_wq);
+		destroy_workqueue(ipd->notify_wq);
+
+		flush_workqueue(ipd->mc_wq);
+		destroy_workqueue(ipd->mc_wq);
+
+		ipd_wr_lock(ipd)
 		if (!hash_empty(ipd->ipd_port_ht))
 			hash_for_each(ipd->ipd_port_ht, bkt, ipn, ipn_hport)
 				ipn_free(ipn);
 
 		BUG_ON(!hash_empty(ipd->ipd_cport_ht));
 		BUG_ON(!hash_empty(ipd->ipd_name_ht));
+		ipd_wr_unlock(ipd)
 
 		kfree(ipd);
 

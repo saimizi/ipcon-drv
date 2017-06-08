@@ -28,6 +28,7 @@ struct ipcon_group_info {
 };
 
 struct ipcon_peer_node {
+	rwlock_t lock;
 	char name[IPCON_MAX_NAME_LEN];
 	__u32 port;
 	__u32 ctrl_port;
@@ -43,10 +44,13 @@ struct ipcon_peer_node {
 
 struct ipcon_peer_db {
 	rwlock_t lock;
-	unsigned long group_bitmap[BITS_TO_LONGS(IPCON_MAX_GROUP)];
 	DECLARE_HASHTABLE(ipd_name_ht, IPD_HASH_BIT);
 	DECLARE_HASHTABLE(ipd_port_ht, IPD_HASH_BIT);
 	DECLARE_HASHTABLE(ipd_cport_ht, IPD_HASH_BIT);
+	rwlock_t group_bitmap_lock;
+	unsigned long group_bitmap[BITS_TO_LONGS(IPCON_MAX_GROUP)];
+	struct workqueue_struct *mc_wq;
+	struct workqueue_struct *notify_wq;
 };
 
 static inline unsigned long str2hash(char *s)
@@ -68,46 +72,97 @@ static inline unsigned long str2hash(char *s)
 	return hash;
 }
 
-static inline void ipd_rd_lock(struct ipcon_peer_db *db)
-{
-	read_lock(&db->lock);
-};
-
-static inline void ipd_rd_unlock(struct ipcon_peer_db *db)
-{
-	read_unlock(&db->lock);
-};
-
-static inline void ipd_wr_lock(struct ipcon_peer_db *db)
-{
-	write_lock(&db->lock);
-};
-
-static inline int ipd_wr_trylock(struct ipcon_peer_db *db)
-{
-	return write_trylock(&db->lock);
-};
-
-static inline void ipd_wr_unlock(struct ipcon_peer_db *db)
-{
-	write_unlock(&db->lock);
-};
-
-static inline int group_inuse(struct ipcon_peer_db *ipd, int group)
-{
-	return test_bit(group, ipd->group_bitmap);
+#define ipd_rd_lock(db)				\
+{						\
+	ipcon_dbg_lock("wait ipd_rd_lock.\n");	\
+	read_lock(&db->lock);			\
+	ipcon_dbg_lock("got ipd_rd_lock.\n");	\
 }
 
-static inline void reg_group(struct ipcon_peer_db *ipd, int group)
-{
-	set_bit(group, ipd->group_bitmap);
+
+#define ipd_rd_unlock(db)				\
+{							\
+	read_unlock(&db->lock);				\
+	ipcon_dbg_lock("release ipd_rd_lock.\n");	\
 }
 
-static inline void unreg_group(struct ipcon_peer_db *ipd, int group)
-{
-	clear_bit(group, ipd->group_bitmap);
+#define ipd_wr_lock(db)				\
+{						\
+	ipcon_dbg_lock("wait ipd_wr_lock.\n");	\
+	write_lock(&db->lock);			\
+	ipcon_dbg_lock("got ipd_wr_lock.\n");	\
 }
 
+#define ipd_wr_unlock(db)				\
+{							\
+	write_unlock(&db->lock);			\
+	ipcon_dbg_lock("release ipd_wr_lock.\n");	\
+}
+
+#define ipn_rd_lock(ipn)			\
+{						\
+	ipcon_dbg_lock("wait ipn_rd_lock.\n");	\
+	read_lock(&ipn->lock);			\
+	ipcon_dbg_lock("got ipn_rd_lock.\n");	\
+}
+
+#define ipn_rd_unlock(ipn)				\
+{							\
+	read_unlock(&ipn->lock);			\
+	ipcon_dbg_lock("release ipn_rd_lock.\n");	\
+}
+
+#define ipn_wr_lock(ipn)			\
+{						\
+	ipcon_dbg_lock("wait ipn_wr_lock.\n");	\
+	write_lock(&ipn->lock);			\
+	ipcon_dbg_lock("got ipn_wr_lock.\n");	\
+}
+
+#define ipn_wr_unlock(ipn)				\
+{							\
+	write_unlock(&ipn->lock);			\
+	ipcon_dbg_lock("release ipn_wr_lock.\n");	\
+}
+
+static inline int group_inuse(struct ipcon_peer_db *db, int group)
+{
+	int ret = 0;
+
+	read_lock(&db->group_bitmap_lock);
+	ret = test_bit(group, db->group_bitmap);
+	read_unlock(&db->group_bitmap_lock);
+
+	return ret;
+}
+
+static inline void reg_group(struct ipcon_peer_db *db, int group)
+{
+	write_lock(&db->group_bitmap_lock);
+	set_bit(group, db->group_bitmap);
+	write_unlock(&db->group_bitmap_lock);
+}
+
+static inline int reg_new_group(struct ipcon_peer_db *db)
+{
+	int group = 0;
+
+	write_lock(&db->group_bitmap_lock);
+	group = find_first_zero_bit(db->group_bitmap,
+			IPCON_MAX_GROUP);
+	if (group < IPCON_MAX_GROUP)
+		set_bit(group, db->group_bitmap);
+	write_unlock(&db->group_bitmap_lock);
+
+	return group;
+}
+
+static inline void unreg_group(struct ipcon_peer_db *db, int group)
+{
+	write_lock(&db->group_bitmap_lock);
+	clear_bit(group, db->group_bitmap);
+	write_unlock(&db->group_bitmap_lock);
+}
 
 struct ipcon_group_info *igi_alloc(char *name, unsigned int group, gfp_t flag);
 void igi_del(struct ipcon_group_info *igi);

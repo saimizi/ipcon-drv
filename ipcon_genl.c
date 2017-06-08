@@ -127,20 +127,43 @@ static int ipcon_multicast(struct sk_buff *skb, u32 port, unsigned int group,
 	return ret;
 }
 
-/* ipcon_send_kevent should be called with write lock of ipcon_db */
-static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags)
+struct ipcon_work {
+	struct work_struct work;
+	void *data;
+};
+
+static struct ipcon_work *iw_alloc(work_func_t func, u32 datalen, gfp_t flags)
+{
+	struct ipcon_work *iw = NULL;
+
+	iw = kmalloc(sizeof(*iw), flags);
+	if (iw) {
+		INIT_WORK(&iw->work, func);
+		iw->data = kmalloc(datalen, flags);
+		if (!iw->data)
+			kfree(iw);
+	}
+
+	return iw;
+}
+
+static void iw_free(struct ipcon_work *iw)
+{
+	kfree(iw->data);
+	kfree(iw);
+}
+
+static void ipcon_send_kevent_msg(struct ipcon_kevent *ik)
 {
 	int ret = 0;
 	struct sk_buff *msg = NULL;
-	void *hdr = NULL;
+	void *hdr;
 
 	if (!ik)
 		return;
 
 	do {
-		struct ipcon_group_info *igi = NULL;
-
-		msg = nlmsg_new(NLMSG_DEFAULT_SIZE, flags);
+		msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
 		if (!msg)
 			break;
 
@@ -175,55 +198,53 @@ static void ipcon_send_kevent(struct ipcon_kevent *ik, gfp_t flags)
 
 		genlmsg_end(msg, hdr);
 
-		igi = ipd_get_igi(ipcon_db, 0, IPCON_KERNEL_GROUP_PORT);
-		if (!igi)
-			BUG();
-
-		if (igi->last_grp_msg) {
-			nlmsg_free(igi->last_grp_msg);
-			igi->last_grp_msg = NULL;
-		}
-
-		skb_get(msg);
-		igi->last_grp_msg = msg;
-
-		ipcon_multicast(msg, 0, IPCON_KERNEL_GROUP_PORT, flags);
+		ipcon_multicast(msg, 0, IPCON_KERNEL_GROUP_PORT, GFP_KERNEL);
 
 	} while (0);
 }
 
-static void unreg_group_safe(int group)
+static void ipcon_kevent_worker(struct work_struct *work)
 {
-	unreg_group(ipcon_db, group);
-	ipcon_clear_multicast_user(&ipcon_fam, group);
+	struct ipcon_work *iw = container_of(work, struct ipcon_work, work);
+	struct ipcon_kevent *ik = iw->data;
+
+	ipcon_dbg("enter kevent: %d\n", ik->type);
+
+	ipcon_send_kevent_msg(ik);
+
+	/*
+	 * this will free struct work_struct "work" itself.
+	 * workqueue implementation will not access work anymore.
+	 * see comment in process_one_work() of workqueue.c
+	 */
+	iw_free(iw);
+	ipcon_dbg("exit.\n");
 }
 
-/*
- * This function is called from another context.
- */
-static int ipcon_netlink_notify(struct notifier_block *nb,
-				  unsigned long state,
-				  void *_notify)
+static void ipcon_notify_worker(struct work_struct *work)
 {
-	struct netlink_notify *n = _notify;
-	struct ipcon_kevent ik;
+	struct ipcon_work *iw = container_of(work, struct ipcon_work, work);
+	u32 port = *((u32 *)iw->data);
 	struct ipcon_peer_node *ipn = NULL;
 	struct ipcon_group_info *igi = NULL;
+	struct ipcon_kevent *ik = NULL;
 	int bkt = 0;
 
-	if (n->protocol != NETLINK_GENERIC)
-		return NOTIFY_DONE;
+	if (!port)
+		return;
 
-	if (state != NETLINK_URELEASE)
-		return NOTIFY_DONE;
+	ipcon_dbg("enter port: %lu\n", (unsigned long)port);
 
-	ipd_wr_lock(ipcon_db);
 	do {
 		/*
 		 * Since both ctrl port and com port resides in a single
 		 * peer, only use com port can remove peer node (ipn).
 		 */
-		ipn = ipd_lookup_byport(ipcon_db, (u32)n->portid);
+		ipd_wr_lock(ipcon_db);
+		ipn = ipd_lookup_byport(ipcon_db, port);
+		ipn_del(ipn);
+		ipd_wr_unlock(ipcon_db);
+
 		if (!ipn)
 			break;
 
@@ -234,20 +255,30 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 		if (is_anon(ipn))
 			break;
 
-		ipn_del(ipn);
 		if (!hash_empty(ipn->ipn_group_ht)) {
 			hash_for_each(ipn->ipn_group_ht, bkt, igi, igi_hgroup) {
+				struct ipcon_work *iw_mc = NULL;
+
 				igi_del(igi);
-				unreg_group_safe(igi->group);
+				unreg_group(ipcon_db, igi->group);
 
 				ipcon_dbg("Group %s.%s@%d removed.\n",
 					ipn->name, igi->name, igi->group);
 
-				ik.type = IPCON_EVENT_GRP_REMOVE;
-				strcpy(ik.group.name, igi->name);
-				strcpy(ik.group.peer_name, ipn->name);
+				/* TODO Add completion here */
+				ipcon_clear_multicast_user(&ipcon_fam,
+						igi->group);
 
-				ipcon_send_kevent(&ik, GFP_ATOMIC);
+				iw_mc = iw_alloc(ipcon_kevent_worker,
+						sizeof(*ik), GFP_KERNEL);
+				if (iw_mc) {
+					ik = iw_mc->data;
+					ik->type = IPCON_EVENT_GRP_REMOVE;
+					strcpy(ik->group.name, igi->name);
+					strcpy(ik->group.peer_name, ipn->name);
+					queue_work(ipcon_db->mc_wq,
+							&iw_mc->work);
+				}
 
 				igi_free(igi);
 			}
@@ -259,19 +290,67 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 		 * name.
 		 */
 		if (is_service(ipn)) {
-			ik.type = IPCON_EVENT_PEER_REMOVE;
-			strcpy(ik.peer.name, ipn->name);
-			ipcon_send_kevent(&ik, GFP_ATOMIC);
+			struct ipcon_work *iw_mc = NULL;
+
+			iw_mc = iw_alloc(ipcon_kevent_worker,
+					sizeof(*ik), GFP_KERNEL);
+			if (iw_mc) {
+				ik = iw_mc->data;
+				ik->type = IPCON_EVENT_PEER_REMOVE;
+				strcpy(ik->peer.name, ipn->name);
+				queue_work(ipcon_db->mc_wq, &iw_mc->work);
+			}
 		}
-
-		ipn_free(ipn);
-
 	} while (0);
-	ipd_wr_unlock(ipcon_db);
+
+	ipn_free(ipn);
+	iw_free(iw);
+	ipcon_dbg("exit\n");
+}
+
+struct ipcon_multicast_worker_data {
+	unsigned int group;
+	struct sk_buff *msg;
+};
+
+static void ipcon_multicast_worker(struct work_struct *work)
+{
+	struct ipcon_work *iw = container_of(work, struct ipcon_work, work);
+	struct ipcon_multicast_worker_data *imwd = iw->data;
+
+	ipcon_dbg("%s: group: %d\n", __func__, imwd->group);
+
+	if (imwd->group == IPCON_KERNEL_GROUP_PORT)
+		return;
+
+	ipcon_multicast(imwd->msg, 0, imwd->group, GFP_KERNEL);
+
+	iw_free(iw);
+}
+
+/*
+ * This function is called from another context.
+ */
+static int ipcon_netlink_notify(struct notifier_block *nb,
+			  unsigned long state, void *_notify)
+{
+	struct netlink_notify *n = _notify;
+	struct ipcon_work *iw = NULL;
+
+	if (n->protocol != NETLINK_GENERIC)
+		return NOTIFY_DONE;
+
+	if (state != NETLINK_URELEASE)
+		return NOTIFY_DONE;
+
+	iw = iw_alloc(ipcon_notify_worker, sizeof(n->portid), GFP_ATOMIC);
+	if (iw) {
+		*((u32 *)iw->data) = n->portid;
+		queue_work(ipcon_db->notify_wq, &iw->work);
+	}
 
 	return 0;
 }
-
 
 static int ipcon_peer_reslove(struct sk_buff *skb, struct genl_info *info)
 {
@@ -332,14 +411,102 @@ static int ipcon_peer_reslove(struct sk_buff *skb, struct genl_info *info)
 	return ret;
 }
 
+static int ipn_reg_group(struct ipcon_peer_node *ipn, char *name,
+		unsigned int group)
+{
+	int ret = 0;
+	struct ipcon_group_info *igi = NULL;
+	struct ipcon_group_info *existed = NULL;
+	struct ipcon_kevent *ik;
+	struct ipcon_work *iw = NULL;
+
+	do {
+		igi = igi_alloc(name, (u32)group, GFP_ATOMIC);
+		if (!igi) {
+			ret = -ENOMEM;
+			break;
+		}
+
+		ipn_wr_lock(ipn);
+		existed = ipn_lookup_byname(ipn, name);
+		if (!existed)
+			ret = ipn_insert(ipn, igi);
+		else
+			ret = -EEXIST;
+		ipn_wr_unlock(ipn);
+
+		if (ret < 0) {
+			igi_free(igi);
+			break;
+		}
+
+		ipcon_dbg("Group %s.%s@%d registered.\n",
+			ipn->name, igi->name, group);
+
+		iw = iw_alloc(ipcon_kevent_worker, sizeof(*ik), GFP_ATOMIC);
+		if (iw) {
+			ik = iw->data;
+
+			ik->type = IPCON_EVENT_GRP_ADD;
+			strcpy(ik->group.name, name);
+			strcpy(ik->group.peer_name, ipn->name);
+			queue_work(ipcon_db->mc_wq, &iw->work);
+		}
+	} while (0);
+
+	return ret;
+}
+
+static int ipn_unreg_group(struct ipcon_peer_node *ipn, char *name,
+		unsigned int *group)
+{
+	int ret = 0;
+	struct ipcon_group_info *igi = NULL;
+	struct ipcon_kevent *ik;
+	struct ipcon_work *iw = NULL;
+
+	do {
+		ipn_wr_lock(ipn);
+		igi = ipn_lookup_byname(ipn, name);
+		igi_del(igi);
+		ipn_wr_unlock(ipn);
+
+		if (!igi) {
+			ret = -ESRCH;
+			break;
+		}
+
+
+		*group = igi->group;
+
+		ipcon_dbg("Group %s.%s@%d unregistered.\n",
+			ipn->name, igi->name, igi->group);
+
+		iw = iw_alloc(ipcon_kevent_worker, sizeof(*ik), GFP_ATOMIC);
+		if (iw) {
+			ik = iw->data;
+
+			ik->type = IPCON_EVENT_GRP_REMOVE;
+			strcpy(ik->group.name, name);
+			strcpy(ik->group.peer_name, ipn->name);
+			queue_work(ipcon_db->mc_wq, &iw->work);
+		}
+
+		igi_free(igi);
+	} while (0);
+
+	return ret;
+}
+
 static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 {
 	int ret = 0;
 	char name[IPCON_MAX_NAME_LEN];
 	__u32 msg_type;
 	struct ipcon_peer_node *ipn = NULL;
-	struct ipcon_group_info *igi = NULL;
+	int id = 0;
 
+	ipcon_dbg("enter.\n");
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
 		!info->attrs[IPCON_ATTR_GRP_NAME])
 		return -EINVAL;
@@ -354,21 +521,12 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 	if (!strcmp(IPCON_KERNEL_GROUP, name))
 		return -EINVAL;
 
-	ipd_wr_lock(ipcon_db);
+	id = reg_new_group(ipcon_db);
+	if (id >= IPCON_MAX_GROUP)
+		return -ENOBUFS;
+
+	ipd_rd_lock(ipcon_db);
 	do {
-		int id = 0;
-		struct ipcon_kevent ik;
-
-		id = find_first_zero_bit(ipcon_db->group_bitmap,
-				IPCON_MAX_GROUP);
-
-		if (id >= IPCON_MAX_GROUP) {
-			ipcon_err("No free group id.");
-			ret = -ENOBUFS;
-			break;
-		}
-
-
 		ipn = ipd_lookup_bycport(ipcon_db, info->snd_portid);
 		if (!ipn) {
 			ipcon_err("No port %lu found\n.",
@@ -384,37 +542,15 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
-		igi = ipn_lookup_byname(ipn, name);
-		if (igi) {
-			ipcon_err("Group %s existed.\n", name);
-			ret = -EEXIST;
-			break;
-		}
-
-		igi = igi_alloc(name, (u32)id, GFP_KERNEL);
-		if (!igi) {
-			ret = -ENOMEM;
-			break;
-		}
-
-		ret = ipn_insert(ipn, igi);
-		if (ret < 0) {
-			igi_free(igi);
-			break;
-		}
-
-		reg_group(ipcon_db, id);
-		ipcon_dbg("Group %s.%s@%d registered.\n",
-				ipn->name, igi->name, id);
-
-		ik.type = IPCON_EVENT_GRP_ADD;
-		strcpy(ik.group.name, name);
-		strcpy(ik.group.peer_name, ipn->name);
-		ipcon_send_kevent(&ik, GFP_ATOMIC);
+		ret = ipn_reg_group(ipn, name, id);
 
 	} while (0);
-	ipd_wr_unlock(ipcon_db);
+	ipd_rd_unlock(ipcon_db);
 
+	if (ret < 0)
+		unreg_group(ipcon_db, id);
+
+	ipcon_dbg("exit (%d).\n", ret);
 	return ret;
 }
 
@@ -425,24 +561,18 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 	__u32 ctrl_port;
 	__u32 msg_type;
 	struct ipcon_peer_node *ipn = NULL;
-	struct ipcon_group_info *igi = NULL;
+	unsigned int group = 0;
 
-	ipd_wr_lock(ipcon_db);
+	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
+		!info->attrs[IPCON_ATTR_GRP_NAME])
+		return -EINVAL;
+
+	msg_type = nla_get_u32(info->attrs[IPCON_ATTR_MSG_TYPE]);
+	if (msg_type != IPCON_MSG_UNICAST)
+		return -EINVAL;
+
+	ipd_rd_lock(ipcon_db);
 	do {
-		struct ipcon_kevent ik;
-
-		if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
-			!info->attrs[IPCON_ATTR_GRP_NAME]) {
-			ret = -EINVAL;
-			break;
-		}
-
-		msg_type = nla_get_u32(info->attrs[IPCON_ATTR_MSG_TYPE]);
-		if (msg_type != IPCON_MSG_UNICAST) {
-			ret = -EINVAL;
-			break;
-		}
-
 		ctrl_port = info->snd_portid;
 		nla_strlcpy(name, info->attrs[IPCON_ATTR_GRP_NAME],
 				IPCON_MAX_NAME_LEN);
@@ -460,30 +590,30 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
-		igi = ipn_lookup_byname(ipn, name);
-		if (!igi) {
-			ret = -ESRCH;
-			break;
-		}
-		ipcon_dbg("Group %s.%s@%d removed.\n",
-				ipn->name, igi->name, igi->group);
-
-		unreg_group_safe(igi->group);
-		igi_del(igi);
-
-		ik.type = IPCON_EVENT_GRP_REMOVE;
-		strcpy(ik.group.name, name);
-		strcpy(ik.group.peer_name, ipn->name);
-		ipcon_send_kevent(&ik, GFP_KERNEL);
-
-		igi_free(igi);
+		ret = ipn_unreg_group(ipn, name, &group);
 
 	} while (0);
-	ipd_wr_unlock(ipcon_db);
+	ipd_rd_unlock(ipcon_db);
+
+	if (!ret)
+		ipcon_clear_multicast_user(&ipcon_fam, group);
+
+	/*
+	 * Unregister group id at last, so that group id will not be reused
+	 * during ipcon_clear_multicast_user which maybe sleep.
+	 */
+	unreg_group(ipcon_db, group);
 
 	return ret;
 }
 
+/*
+ * FIXME:
+ * Since we can not register group in ipcon driver at present, a race condition
+ * between ADD_MEMBERSHIP in user land and ipcon_grp_unreg() may happen, which
+ * can not be avoided. ipcon_grp_reslove should be replaced with something like
+ * ipcon_join_grp()...
+ */
 static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 {
 	int ret = 0;
@@ -494,8 +624,10 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 	struct ipcon_peer_node *ipn = NULL;
 	struct ipcon_peer_node *self = NULL;
 	struct ipcon_group_info *igi = NULL;
-	void *hdr;
 	int send_last_msg = 0;
+	unsigned int group = 0;
+
+	ipcon_dbg("enter.\n");
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
 		!info->attrs[IPCON_ATTR_SRV_NAME] ||
@@ -517,10 +649,7 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 		send_last_msg = 1;
 
 	ipd_rd_lock(ipcon_db);
-
 	do {
-		struct sk_buff *msg;
-
 		self = ipd_lookup_bycport(ipcon_db, info->snd_portid);
 		BUG_ON(!self);
 
@@ -530,9 +659,8 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
+		ipn_rd_lock(ipn);
 		if (!is_publisher(ipn)) {
-			ipcon_err("%s: %s is not a publisher.\n",
-					__func__, ipn->name);
 			ret = -ESRCH;
 			break;
 		}
@@ -542,6 +670,22 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 			ret = -ESRCH;
 			break;
 		}
+
+		group = igi->group + ipcon_fam.mcgrp_offset;
+		ipn_rd_unlock(ipn);
+	} while (0);
+	ipd_rd_unlock(ipcon_db);
+
+	/*
+	 * Send group id to user land so that it can use it to do
+	 * ADD_MEMBERSHIP. Too bad...
+	 */
+	do {
+		struct sk_buff *msg;
+		void *hdr;
+
+		if (ret)
+			break;
 
 		msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
 		if (!msg) {
@@ -557,38 +701,13 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 		}
 
 		nla_put_u32(msg, IPCON_ATTR_MSG_TYPE, IPCON_MSG_UNICAST);
-		nla_put_u32(msg, IPCON_ATTR_GROUP,
-				igi->group + ipcon_fam.mcgrp_offset);
+		nla_put_u32(msg, IPCON_ATTR_GROUP, group);
 
 		genlmsg_end(msg, hdr);
 		ret = genlmsg_reply(msg, info);
-
-		/* FIXME : this is NOT the right place to do it.
-		 * If target group found, Send cached last group message to
-		 * communication port if required. since genlmsg_unicast() will
-		 * consume the skbuff, a copy has to be created before sending.
-		 *
-		 * see ipcon_multicast_msg().
-		 */
-		if (send_last_msg && igi->last_grp_msg) {
-			struct sk_buff *msg = NULL;
-
-			msg = skb_clone(igi->last_grp_msg, GFP_KERNEL);
-			if (msg) {
-				genlmsg_unicast(genl_info_net(info),
-						msg, self->port);
-				ipcon_dbg("Send last msg of %s.%s to %s@%lu.\n",
-					ipn->name,
-					igi->name,
-					self->name,
-					(unsigned long) self->port);
-			}
-		}
-
 	} while (0);
 
-	ipd_rd_unlock(ipcon_db);
-
+	ipcon_dbg("%s exit(%d).\n", __func__, ret);
 	return ret;
 }
 
@@ -599,12 +718,17 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct genl_info *info)
 	__u32 msg_type;
 	struct ipcon_peer_node *self = NULL;
 	struct ipcon_peer_node *ipn = NULL;
+	u32 tport = 0;
+	struct sk_buff *msg = skb_clone(skb, GFP_KERNEL);
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
 		!info->attrs[IPCON_ATTR_PEER_NAME] ||
 		!info->attrs[IPCON_ATTR_SRC_PEER] ||
 		!info->attrs[IPCON_ATTR_DATA])
 		return -EINVAL;
+
+	if (!msg)
+		return -ENOMEM;
 
 	msg_type = nla_get_u32(info->attrs[IPCON_ATTR_MSG_TYPE]);
 	if (msg_type != IPCON_MSG_UNICAST)
@@ -618,7 +742,6 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct genl_info *info)
 
 	ipd_rd_lock(ipcon_db);
 	do {
-		struct sk_buff *msg = skb_clone(skb, GFP_KERNEL);
 
 		self = ipd_lookup_bycport(ipcon_db, info->snd_portid);
 		BUG_ON(!self);
@@ -638,18 +761,19 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
+		tport = ipn->port;
 		ipcon_dbg("Msg %s@%lu --> %s@%lu\n",
 				self->name,
 				(unsigned long)self->port,
 				ipn->name,
 				(unsigned long)ipn->port);
-
-		ret = genlmsg_unicast(genl_info_net(info), msg,
-				ipn->port);
-
-
 	} while (0);
 	ipd_rd_unlock(ipcon_db);
+
+	if (!ret)
+		ret = genlmsg_unicast(genl_info_net(info), msg, tport);
+	else
+		kfree_skb(msg);
 
 	return ret;
 }
@@ -662,11 +786,18 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 	__u32 msg_type;
 	struct ipcon_peer_node *ipn = NULL;
 	struct ipcon_group_info *igi = NULL;
+	unsigned int group = 0;
+	struct sk_buff *msg = skb_clone(skb, GFP_KERNEL);
+	struct ipcon_work *iw = NULL;
+	int sync = 0;
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
 		!info->attrs[IPCON_ATTR_GRP_NAME] ||
 		!info->attrs[IPCON_ATTR_DATA])
 		return -EINVAL;
+
+	if (!msg)
+		return -ENOMEM;
 
 	msg_type = nla_get_u32(info->attrs[IPCON_ATTR_MSG_TYPE]);
 	if (msg_type != IPCON_MSG_MULTICAST)
@@ -679,10 +810,11 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 	if (!strcmp(IPCON_KERNEL_GROUP, name))
 		return -EINVAL;
 
-	ipd_wr_lock(ipcon_db);
-	do {
-		struct sk_buff *msg = skb_clone(skb, GFP_KERNEL);
+	if (info->attrs[IPCON_ATTR_FLAG])
+		sync = 1;
 
+	ipd_rd_lock(ipcon_db);
+	do {
 		ipn = ipd_lookup_bycport(ipcon_db, ctrl_port);
 		if (!ipn) {
 			ret = -ESRCH;
@@ -696,35 +828,55 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
+		ipn_rd_lock(ipn);
 		igi = ipn_lookup_byname(ipn, name);
-		if (!igi) {
+		if (!igi)
 			ret = -ESRCH;
-			break;
-		}
+		else
+			group = igi->group;
+		ipn_rd_unlock(ipn);
+	} while (0);
+	ipd_rd_unlock(ipcon_db);
 
-		ipcon_dbg("Send msg to group %s.%s.\n",
-				ipn->name, igi->name);
+	/*
+	 * Ok, send multicast message.
+	 *
+	 * If sync is specified, ipcon_multicast() is called directly, which
+	 * will not return until message is deliveried.
+	 *
+	 * If sync is not specified, just queue the message to make worker do
+	 * it later, which maybe not deliveried if sender unregister the group
+	 * before the message is deliveried.
+	 */
 
-		ret = ipcon_multicast(msg, ipn->ctrl_port, igi->group,
-				GFP_KERNEL);
+	do {
+		struct ipcon_multicast_worker_data *imwd = NULL;
 
 		if (ret < 0)
 			break;
 
-		ipcon_dbg("Update last msg of %s.%s.\n",
-				ipn->name, igi->name);
+		if (sync) {
+			ret = ipcon_multicast(msg, 0, group, GFP_KERNEL);
+			break;
+		}
 
-		/* Caching the last muticast message */
-		if (igi->last_grp_msg)
-			nlmsg_free(igi->last_grp_msg);
+		iw = iw_alloc(ipcon_multicast_worker,
+				sizeof(*imwd), GFP_ATOMIC);
 
-		igi->last_grp_msg = skb_clone(skb, GFP_KERNEL);
+		if (!iw) {
+			ret = -ENOMEM;
+			break;
+		}
 
-
+		imwd = iw->data;
+		imwd->group = group;
+		imwd->msg = msg;
+		queue_work(ipcon_db->mc_wq, &iw->work);
 
 	} while (0);
-	ipd_wr_unlock(ipcon_db);
 
+	if (ret < 0)
+		kfree_skb(msg);
 
 	return ret;
 }
@@ -735,8 +887,11 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 	int ret = 0;
 	struct ipcon_peer_node *ipn = NULL;
 	u32 port = 0;
-	struct ipcon_kevent ik;
+	struct ipcon_kevent *ik;
+	struct ipcon_work *iw = NULL;
 	u32 peer_type = 0;
+
+	ipcon_dbg("%s enter.\n", __func__);
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
 		!info->attrs[IPCON_ATTR_PORT] ||
@@ -764,7 +919,7 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 		}
 
 		ipn = ipn_alloc(port, info->snd_portid, name,
-				(enum peer_type)peer_type, GFP_KERNEL);
+				(enum peer_type)peer_type, GFP_ATOMIC);
 		if (!ipn) {
 			ret = -ENOMEM;
 			break;
@@ -783,15 +938,20 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 		}
 
 		if (is_service(ipn)) {
-			memset(&ik, 0, sizeof(ik));
-			ik.type = IPCON_EVENT_PEER_ADD;
-			strcpy(ik.peer.name, ipn->name);
-			ipcon_send_kevent(&ik, GFP_ATOMIC);
+			iw = iw_alloc(ipcon_kevent_worker,
+					sizeof(*ik), GFP_ATOMIC);
+			if (iw) {
+				ik = iw->data;
+				ik->type = IPCON_EVENT_PEER_ADD;
+				strcpy(ik->peer.name, ipn->name);
+				queue_work(ipcon_db->mc_wq, &iw->work);
+			}
 		}
 
 	} while (0);
 	ipd_wr_unlock(ipcon_db);
 
+	ipcon_dbg("%s exit(%d).\n", __func__, ret);
 	return ret;
 
 }
