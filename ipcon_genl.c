@@ -227,6 +227,9 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 		if (!ipn)
 			break;
 
+		/* Decrease reference count */
+		module_put(THIS_MODULE);
+
 		/* No need notify user space for an anonymous peer */
 		if (is_anon(ipn))
 			break;
@@ -263,8 +266,6 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 
 		ipn_free(ipn);
 
-		/* Decrease reference count */
-		module_put(THIS_MODULE);
 	} while (0);
 	ipd_wr_unlock(ipcon_db);
 
@@ -570,16 +571,18 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 		 * see ipcon_multicast_msg().
 		 */
 		if (send_last_msg && igi->last_grp_msg) {
-			skb_get(igi->last_grp_msg);
-			msg = igi->last_grp_msg;
-			if (msg->sk)
-				msg->sk = NULL;
-			genlmsg_unicast(genl_info_net(info), msg, self->port);
-			ipcon_dbg("Send last msg of %s.%s to %s@%lu.\n",
+			struct sk_buff *msg = NULL;
+
+			msg = skb_clone(igi->last_grp_msg, GFP_KERNEL);
+			if (msg) {
+				genlmsg_unicast(genl_info_net(info),
+						msg, self->port);
+				ipcon_dbg("Send last msg of %s.%s to %s@%lu.\n",
 					ipn->name,
 					igi->name,
 					self->name,
 					(unsigned long) self->port);
+			}
 		}
 
 	} while (0);
