@@ -624,7 +624,6 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 	struct ipcon_peer_node *ipn = NULL;
 	struct ipcon_peer_node *self = NULL;
 	struct ipcon_group_info *igi = NULL;
-	int send_last_msg = 0;
 	unsigned int group = 0;
 
 	ipcon_dbg("enter.\n");
@@ -644,9 +643,6 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 
 	nla_strlcpy(srvname, info->attrs[IPCON_ATTR_SRV_NAME],
 			IPCON_MAX_NAME_LEN);
-
-	if (info->attrs[IPCON_ATTR_FLAG])
-		send_last_msg = 1;
 
 	ipd_rd_lock(ipcon_db);
 	do {

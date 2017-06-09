@@ -24,7 +24,6 @@ struct ipcon_group_info {
 	struct hlist_node igi_hgroup;
 	unsigned int group;
 	char name[IPCON_MAX_NAME_LEN];
-	struct sk_buff *last_grp_msg;
 };
 
 struct ipcon_peer_node {

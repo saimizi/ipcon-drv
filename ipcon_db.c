@@ -19,7 +19,6 @@ struct ipcon_group_info *igi_alloc(char *name, unsigned int group, gfp_t flag)
 
 	strcpy(igi->name, name);
 	igi->group = group;
-	igi->last_grp_msg = NULL;
 	INIT_HLIST_NODE(&igi->igi_hname);
 	INIT_HLIST_NODE(&igi->igi_hgroup);
 
@@ -44,7 +43,6 @@ void igi_free(struct ipcon_group_info *igi)
 		return;
 
 	igi_del(igi);
-	kfree_skb(igi->last_grp_msg);
 	kfree(igi);
 }
 
