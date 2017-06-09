@@ -21,6 +21,8 @@ struct ipcon_group_info *igi_alloc(char *name, unsigned int group, gfp_t flag)
 	igi->group = group;
 	INIT_HLIST_NODE(&igi->igi_hname);
 	INIT_HLIST_NODE(&igi->igi_hgroup);
+	atomic_set(&igi->msg_sending_cnt, 0);
+	init_waitqueue_head(&igi->wq);
 
 	return igi;
 }
@@ -41,6 +43,8 @@ void igi_free(struct ipcon_group_info *igi)
 {
 	if (!igi)
 		return;
+
+	BUG_ON(atomic_read(&igi->msg_sending_cnt));
 
 	igi_del(igi);
 	kfree(igi);
