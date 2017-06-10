@@ -98,6 +98,12 @@ static inline int nc_add(struct nc_head *nch, char *name, gfp_t flag)
 		if (ret > 0)
 			break;
 
+		nce = nce_alloc(name, flag);
+		if (!nce) {
+			ret = -ENOMEM;
+			break;
+		}
+
 		idr_preload(flag);
 		write_lock(&nch->lock);
 		id = idr_alloc(&nch->idr, nce, 1, -1, flag);
@@ -105,13 +111,8 @@ static inline int nc_add(struct nc_head *nch, char *name, gfp_t flag)
 		idr_preload_end();
 
 		if (id < 0) {
-			ret = -ENOMEM;
-			break;
-		}
-
-		nce = nce_alloc(name, flag);
-		if (!nce) {
-			ret = -ENOMEM;
+			kfree(nce);
+			ret = id;
 			break;
 		}
 
