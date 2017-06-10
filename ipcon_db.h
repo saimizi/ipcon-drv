@@ -16,6 +16,7 @@
 #include <linux/string.h>
 #include <linux/types.h>
 #include "ipcon.h"
+#include "name_cache.h"
 #include "ipcon_dbg.h"
 
 #define IPN_HASH_BIT	4
@@ -53,25 +54,6 @@ struct ipcon_peer_db {
 	struct workqueue_struct *mc_wq;
 	struct workqueue_struct *notify_wq;
 };
-
-static inline unsigned long str2hash(char *s)
-{
-	unsigned long hash = init_name_hash();
-
-	while (*s) {
-		char c = *s;
-
-		if (c >= 'A' && c <= 'Z')
-			c += 'a' - 'A';
-
-		hash = partial_name_hash(c, hash);
-		s++;
-	}
-
-	hash = end_name_hash(hash);
-
-	return hash;
-}
 
 #define ipd_rd_lock(db)				\
 {						\

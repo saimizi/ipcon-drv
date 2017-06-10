@@ -14,15 +14,14 @@ struct ipcon_group_info *igi_alloc(char *name, unsigned int group, gfp_t flag)
 		return NULL;
 
 	igi = kmalloc(sizeof(*igi), flag);
-	if (!igi)
-		return NULL;
-
-	strcpy(igi->name, name);
-	igi->group = group;
-	INIT_HLIST_NODE(&igi->igi_hname);
-	INIT_HLIST_NODE(&igi->igi_hgroup);
-	atomic_set(&igi->msg_sending_cnt, 0);
-	init_waitqueue_head(&igi->wq);
+	if (igi) {
+		strcpy(igi->name, name);
+		igi->group = group;
+		INIT_HLIST_NODE(&igi->igi_hname);
+		INIT_HLIST_NODE(&igi->igi_hgroup);
+		atomic_set(&igi->msg_sending_cnt, 0);
+		init_waitqueue_head(&igi->wq);
+	}
 
 	return igi;
 }
