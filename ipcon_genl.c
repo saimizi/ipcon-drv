@@ -85,6 +85,48 @@ static int ipcon_filter(struct sock *dsk, struct sk_buff *skb, void *data)
 		return 1;
 	}
 
+	/* data is only present for ipcon_kevent when sending ipcon kevent */
+	if (data) {
+		int skip = 0;
+
+		skip = ipn_filter_kevent(ipn, data);
+		if (skip) {
+			struct ipcon_kevent *ik = data;
+			char *event = NULL;
+			char *peer_name = NULL;
+			char *group_name = NULL;
+
+			switch (ik->type) {
+			case IPCON_EVENT_PEER_ADD:
+				event = "IPCON_EVENT_PEER_ADD";
+				peer_name = ik->peer.name;
+				break;
+			case IPCON_EVENT_PEER_REMOVE:
+				event = "IPCON_EVENT_PEER_REMOVE";
+				peer_name = ik->peer.name;
+				break;
+			case IPCON_EVENT_GRP_ADD:
+				event = "IPCON_EVENT_GRP_ADD";
+				peer_name = ik->group.peer_name;
+				group_name = ik->group.name;
+				break;
+			case IPCON_EVENT_GRP_REMOVE:
+				event = "IPCON_EVENT_GRP_REMOVE";
+				peer_name = ik->group.peer_name;
+				group_name = ik->group.name;
+				break;
+			}
+
+			ipcon_dbg("Drop notify to %s : %s %s %s\n",
+				nc_refname(ipn->nameid),
+				event,
+				peer_name,
+				group_name);
+		}
+		return skip;
+	}
+
+
 	ipcon_dbg("Multicast to %s@%lu.\n",
 			nc_refname(ipn->nameid),
 			(unsigned long)ipn->port);
@@ -93,7 +135,7 @@ static int ipcon_filter(struct sock *dsk, struct sk_buff *skb, void *data)
 }
 
 static int ipcon_multicast(struct sk_buff *skb, u32 port, unsigned int group,
-		gfp_t flags)
+		gfp_t flags, void *filter_data)
 {
 	int ret = 0;
 	struct genl_family *family = &ipcon_fam;
@@ -120,7 +162,7 @@ static int ipcon_multicast(struct sk_buff *skb, u32 port, unsigned int group,
 				real_group,
 				flags,
 				ipcon_filter,
-				NULL);
+				filter_data);
 
 	} while (0);
 
@@ -198,7 +240,8 @@ static void ipcon_send_kevent_msg(struct ipcon_kevent *ik)
 
 		genlmsg_end(msg, hdr);
 
-		ipcon_multicast(msg, 0, IPCON_KERNEL_GROUP_PORT, GFP_KERNEL);
+		ipcon_multicast(msg, 0, IPCON_KERNEL_GROUP_PORT,
+				GFP_KERNEL, ik);
 
 	} while (0);
 }
@@ -339,7 +382,7 @@ static void ipcon_multicast_worker(struct work_struct *work)
 	if (igi->group == IPCON_KERNEL_GROUP_PORT)
 		return;
 
-	ipcon_multicast(imwd->msg, 0, igi->group, GFP_KERNEL);
+	ipcon_multicast(imwd->msg, 0, igi->group, GFP_KERNEL, NULL);
 
 	/* if group is under un-registering, wake up the process...*/
 	if (atomic_sub_and_test(1, &igi->msg_sending_cnt))
@@ -930,7 +973,8 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 			break;
 
 		if (sync) {
-			ret = ipcon_multicast(msg, 0, igi->group, GFP_KERNEL);
+			ret = ipcon_multicast(msg, 0, igi->group,
+					GFP_KERNEL, NULL);
 
 			/*
 			 * if group is under un-registering, wake up the

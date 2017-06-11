@@ -29,6 +29,13 @@ struct ipcon_group_info {
 	wait_queue_head_t wq;
 };
 
+struct filter_node {
+	struct hlist_node node;
+	enum ipcon_kevent_type type;
+	int peer_nameid;
+	int group_nameid;
+};
+
 struct ipcon_peer_node {
 	rwlock_t lock;
 	int nameid;
@@ -37,6 +44,7 @@ struct ipcon_peer_node {
 	enum peer_type type;
 	DECLARE_HASHTABLE(ipn_name_ht, IPN_HASH_BIT);
 	DECLARE_HASHTABLE(ipn_group_ht, IPN_HASH_BIT);
+	DECLARE_HASHTABLE(filter_ht, IPN_HASH_BIT);
 	struct hlist_node ipn_hname;
 	struct hlist_node ipn_hport;
 	struct hlist_node ipn_hcport;
@@ -174,18 +182,12 @@ struct ipcon_peer_node *ipd_lookup_bycport(struct ipcon_peer_db *ipd,
 int ipd_insert(struct ipcon_peer_db *ipd, struct ipcon_peer_node *ipn);
 void ipd_free(struct ipcon_peer_db *ipd);
 
-static inline struct ipcon_group_info *ipd_get_igi(struct ipcon_peer_db *ipd,
-					u32 port, unsigned int group)
-{
-	struct ipcon_peer_node *ipn = NULL;
-	struct ipcon_group_info *igi = NULL;
+int ipn_add_filter(struct ipcon_peer_node *ipn, enum ipcon_kevent_type type,
+		int peer_nameid, int group_nameid, gfp_t flag);
 
-	ipn = ipd_lookup_byport(ipd, port);
-	if (ipn)
-		igi = ipn_lookup_bygroup(ipn, group);
+int ipn_filter_kevent(struct ipcon_peer_node *ipn,
+		struct ipcon_kevent *ik);
 
-	return igi;
-}
-
-
+void ipn_remove_filter(struct ipcon_peer_node *ipn, enum ipcon_kevent_type type,
+		int peer_nameid, int group_nameid);
 #endif
