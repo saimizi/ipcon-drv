@@ -3,7 +3,7 @@
 ifneq ($(KERNELRELEASE),)
 
 obj-m := ipcon.o
-ipcon-objs := main.o ipcon_genl.o ipcon_db.o
+ipcon-objs := main.o ipcon_genl.o ipcon_db.o name_cache.o
 EXTRA_CFLAGS += -I@ksrc@/net/netlink
 
 #ifeq ($(CONFIG_DEBUG_FS),y)

@@ -12,6 +12,7 @@ struct ipcon_group_info *igi_alloc(int nameid, unsigned int group, gfp_t flag)
 
 	igi = kmalloc(sizeof(*igi), flag);
 	if (igi) {
+		nc_id_get(nameid);
 		igi->nameid = nameid;
 		igi->group = group;
 		INIT_HLIST_NODE(&igi->igi_hname);
@@ -43,6 +44,7 @@ void igi_free(struct ipcon_group_info *igi)
 	BUG_ON(atomic_read(&igi->msg_sending_cnt));
 
 	igi_del(igi);
+	nc_id_put(igi->nameid);
 	kfree(igi);
 }
 
@@ -62,6 +64,7 @@ struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port,
 		INIT_HLIST_NODE(&ipn->ipn_hname);
 		INIT_HLIST_NODE(&ipn->ipn_hport);
 		INIT_HLIST_NODE(&ipn->ipn_hcport);
+		nc_id_get(nameid);
 		ipn->nameid = nameid;
 	}
 
@@ -83,6 +86,7 @@ void ipn_free(struct ipcon_peer_node *ipn)
 		}
 
 	BUG_ON(!hash_empty(ipn->ipn_name_ht));
+	nc_id_put(ipn->nameid);
 	kfree(ipn);
 }
 
