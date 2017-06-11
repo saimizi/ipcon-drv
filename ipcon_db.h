@@ -24,14 +24,14 @@ struct ipcon_group_info {
 	struct hlist_node igi_hname;
 	struct hlist_node igi_hgroup;
 	unsigned int group;
-	char name[IPCON_MAX_NAME_LEN];
+	int nameid;
 	atomic_t msg_sending_cnt;
 	wait_queue_head_t wq;
 };
 
 struct ipcon_peer_node {
 	rwlock_t lock;
-	char name[IPCON_MAX_NAME_LEN];
+	int nameid;
 	__u32 port;
 	__u32 ctrl_port;
 	enum peer_type type;
@@ -147,15 +147,15 @@ static inline void unreg_group(struct ipcon_peer_db *db, int group)
 	write_unlock(&db->group_bitmap_lock);
 }
 
-struct ipcon_group_info *igi_alloc(char *name, unsigned int group, gfp_t flag);
+struct ipcon_group_info *igi_alloc(int nameid, unsigned int group, gfp_t flag);
 void igi_del(struct ipcon_group_info *igi);
 void igi_free(struct ipcon_group_info *igi);
 
 struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port,
-				char *name, enum peer_type type, gfp_t flag);
+				int nameid, enum peer_type type, gfp_t flag);
 void ipn_free(struct ipcon_peer_node *ipn);
 struct ipcon_group_info *ipn_lookup_byname(struct ipcon_peer_node *ipn,
-					char *grp_name);
+					int nameid);
 struct ipcon_group_info *ipn_lookup_bygroup(struct ipcon_peer_node *ipn,
 					unsigned long group);
 
@@ -164,7 +164,7 @@ void ipn_del(struct ipcon_peer_node *ipn);
 
 struct ipcon_peer_db *ipd_alloc(gfp_t flag);
 struct ipcon_peer_node *ipd_lookup_byname(struct ipcon_peer_db *ipd,
-					char *name);
+					int nameid);
 struct ipcon_peer_node *ipd_lookup_byport(struct ipcon_peer_db *ipd,
 					u32 port);
 

@@ -14,6 +14,7 @@
 #include "ipcon.h"
 #include "ipcon_genl.h"
 #include "ipcon_db.h"
+#include "name_cache.h"
 #include "ipcon_dbg.h"
 #ifdef CONFIG_DEBUG_FS
 #include "ipcon_debugfs.h"
@@ -27,6 +28,7 @@
 #define UNUSED_GROUP_NAME	"ipconG"
 static struct genl_multicast_group ipcon_mcgroups[IPCON_MAX_GROUP];
 static struct ipcon_peer_db *ipcon_db;
+static struct nc_head *ipcon_nc;
 
 static struct genl_family ipcon_fam = {
 	.id = GENL_ID_GENERATE,
@@ -86,7 +88,7 @@ static int ipcon_filter(struct sock *dsk, struct sk_buff *skb, void *data)
 	}
 
 	ipcon_dbg("Multicast to %s@%lu.\n",
-			ipn->name,
+			nc_refname(ipcon_nc, ipn->nameid),
 			(unsigned long)ipn->port);
 
 	return 0;
@@ -236,6 +238,7 @@ static void ipcon_notify_worker(struct work_struct *work)
 	ipcon_dbg("enter port: %lu\n", (unsigned long)port);
 
 	do {
+		struct ipcon_work *iw_mc = NULL;
 		/*
 		 * Since both ctrl port and com port resides in a single
 		 * peer, only use com port can remove peer node (ipn).
@@ -274,27 +277,31 @@ static void ipcon_notify_worker(struct work_struct *work)
 				}
 				finish_wait(&igi->wq, &wait);
 
-
 				/* clear users */
 				ipcon_clear_multicast_user(&ipcon_fam,
 						igi->group);
 
 
 				ipcon_dbg("Group %s.%s@%d removed.\n",
-					ipn->name, igi->name, igi->group);
-
-				igi_free(igi);
+					nc_refname(ipcon_nc, ipn->nameid),
+					nc_refname(ipcon_nc, igi->nameid),
+					igi->group);
 
 				iw_mc = iw_alloc(ipcon_kevent_worker,
 						sizeof(*ik), GFP_KERNEL);
 				if (iw_mc) {
 					ik = iw_mc->data;
 					ik->type = IPCON_EVENT_GRP_REMOVE;
-					strcpy(ik->group.name, igi->name);
-					strcpy(ik->group.peer_name, ipn->name);
+					nc_getname(ipcon_nc, igi->nameid,
+						ik->group.name);
+					nc_getname(ipcon_nc, ipn->nameid,
+						ik->group.peer_name);
 					queue_work(ipcon_db->mc_wq,
 							&iw_mc->work);
 				}
+
+				nc_id_put(ipcon_nc, igi->nameid);
+				igi_free(igi);
 
 				unreg_group(ipcon_db, igi->group);
 			}
@@ -305,20 +312,18 @@ static void ipcon_notify_worker(struct work_struct *work)
 		 * for a publisher, only group name is meaningful, not peer
 		 * name.
 		 */
-		if (is_service(ipn)) {
-			struct ipcon_work *iw_mc = NULL;
 
-			iw_mc = iw_alloc(ipcon_kevent_worker,
-					sizeof(*ik), GFP_KERNEL);
-			if (iw_mc) {
-				ik = iw_mc->data;
-				ik->type = IPCON_EVENT_PEER_REMOVE;
-				strcpy(ik->peer.name, ipn->name);
-				queue_work(ipcon_db->mc_wq, &iw_mc->work);
-			}
+		iw_mc = iw_alloc(ipcon_kevent_worker, sizeof(*ik), GFP_KERNEL);
+		if (iw_mc) {
+			ik = iw_mc->data;
+			ik->type = IPCON_EVENT_PEER_REMOVE;
+			nc_getname(ipcon_nc, ipn->nameid, ik->peer.name);
+			queue_work(ipcon_db->mc_wq, &iw_mc->work);
 		}
 	} while (0);
 
+	if (ipn)
+		nc_id_put(ipcon_nc, ipn->nameid);
 	ipn_free(ipn);
 	iw_free(iw);
 	ipcon_dbg("exit\n");
@@ -381,6 +386,7 @@ static int ipcon_peer_reslove(struct sk_buff *skb, struct genl_info *info)
 	struct ipcon_peer_node *ipn = NULL;
 	void *hdr;
 	int flag = 0;
+	int nameid = 0;
 
 	do {
 		struct sk_buff *msg;
@@ -400,11 +406,23 @@ static int ipcon_peer_reslove(struct sk_buff *skb, struct genl_info *info)
 		nla_strlcpy(name, info->attrs[IPCON_ATTR_PEER_NAME],
 				IPCON_MAX_NAME_LEN);
 
-		ipd_rd_lock(ipcon_db);
-		ipn = ipd_lookup_byname(ipcon_db, name);
-		if (ipn)
-			flag = 1;
-		ipd_rd_unlock(ipcon_db);
+		if (!valid_name(name)) {
+			ret = -EINVAL;
+			break;
+		}
+
+		/*
+		 * if no namid found, no peer found, just return without
+		 * IPCON_ATTR_FLAG.
+		 */
+		nameid = nc_getid(ipcon_nc, name);
+		if (nameid > 0) {
+			ipd_rd_lock(ipcon_db);
+			ipn = ipd_lookup_byname(ipcon_db, nameid);
+			if (ipn)
+				flag = 1;
+			ipd_rd_unlock(ipcon_db);
+		}
 
 		msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
 		if (!msg) {
@@ -423,6 +441,7 @@ static int ipcon_peer_reslove(struct sk_buff *skb, struct genl_info *info)
 		nla_put_u32(msg, IPCON_ATTR_MSG_TYPE, IPCON_MSG_UNICAST);
 		if (flag)
 			nla_put_flag(msg, IPCON_ATTR_FLAG);
+
 		genlmsg_end(msg, hdr);
 
 		ret = genlmsg_reply(msg, info);
@@ -432,7 +451,7 @@ static int ipcon_peer_reslove(struct sk_buff *skb, struct genl_info *info)
 	return ret;
 }
 
-static int ipn_reg_group(struct ipcon_peer_node *ipn, char *name,
+static int ipn_reg_group(struct ipcon_peer_node *ipn, int nameid,
 		unsigned int group)
 {
 	int ret = 0;
@@ -442,14 +461,14 @@ static int ipn_reg_group(struct ipcon_peer_node *ipn, char *name,
 	struct ipcon_work *iw = NULL;
 
 	do {
-		igi = igi_alloc(name, (u32)group, GFP_ATOMIC);
+		igi = igi_alloc(nameid, (u32)group, GFP_ATOMIC);
 		if (!igi) {
 			ret = -ENOMEM;
 			break;
 		}
 
 		ipn_wr_lock(ipn);
-		existed = ipn_lookup_byname(ipn, name);
+		existed = ipn_lookup_byname(ipn, nameid);
 		if (!existed)
 			ret = ipn_insert(ipn, igi);
 		else
@@ -461,16 +480,18 @@ static int ipn_reg_group(struct ipcon_peer_node *ipn, char *name,
 			break;
 		}
 
-		ipcon_dbg("Group %s.%s@%d registered.\n",
-			ipn->name, igi->name, group);
-
 		iw = iw_alloc(ipcon_kevent_worker, sizeof(*ik), GFP_ATOMIC);
 		if (iw) {
 			ik = iw->data;
 
 			ik->type = IPCON_EVENT_GRP_ADD;
-			strcpy(ik->group.name, name);
-			strcpy(ik->group.peer_name, ipn->name);
+			nc_getname(ipcon_nc, igi->nameid, ik->group.name);
+			nc_getname(ipcon_nc, ipn->nameid, ik->group.peer_name);
+
+			ipcon_dbg("Group %s.%s@%d registered.\n",
+				ik->group.peer_name,
+				ik->group.name,
+				group);
 			queue_work(ipcon_db->mc_wq, &iw->work);
 		}
 	} while (0);
@@ -485,6 +506,7 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 	__u32 msg_type;
 	struct ipcon_peer_node *ipn = NULL;
 	int id = 0;
+	int nameid = 0;
 
 	ipcon_dbg("enter.\n");
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
@@ -498,8 +520,12 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 	nla_strlcpy(name, info->attrs[IPCON_ATTR_GRP_NAME],
 		IPCON_MAX_NAME_LEN);
 
-	if (!strcmp(IPCON_KERNEL_GROUP, name))
+	if (!valid_name(name) || !strcmp(IPCON_KERNEL_GROUP, name))
 		return -EINVAL;
+
+	nameid = nc_add(ipcon_nc, name, GFP_KERNEL);
+	if (nameid < 0)
+		return nameid;
 
 	id = reg_new_group(ipcon_db);
 	if (id >= IPCON_MAX_GROUP)
@@ -517,18 +543,20 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct genl_info *info)
 
 		if (!is_publisher(ipn)) {
 			ipcon_err("%s: %s is not a publisher.\n",
-					__func__, ipn->name);
+				__func__, nc_refname(ipcon_nc, ipn->nameid));
 			ret = -EPERM;
 			break;
 		}
 
-		ret = ipn_reg_group(ipn, name, id);
+		ret = ipn_reg_group(ipn, nameid, id);
 
 	} while (0);
 	ipd_rd_unlock(ipcon_db);
 
-	if (ret < 0)
+	if (ret < 0) {
 		unreg_group(ipcon_db, id);
+		nc_id_put(ipcon_nc, nameid);
+	}
 
 	ipcon_dbg("exit (%d).\n", ret);
 	return ret;
@@ -542,6 +570,7 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 	__u32 msg_type;
 	struct ipcon_peer_node *ipn = NULL;
 	struct ipcon_group_info *igi = NULL;
+	int nameid = 0;
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
 		!info->attrs[IPCON_ATTR_GRP_NAME])
@@ -551,11 +580,19 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 	if (msg_type != IPCON_MSG_UNICAST)
 		return -EINVAL;
 
+	ctrl_port = info->snd_portid;
+	nla_strlcpy(name, info->attrs[IPCON_ATTR_GRP_NAME],
+			IPCON_MAX_NAME_LEN);
+
+	if (!valid_name(name))
+		return -EINVAL;
+
+	nameid = nc_getid(ipcon_nc, name);
+	if (nameid < 0)
+		return nameid;
+
 	ipd_rd_lock(ipcon_db);
 	do {
-		ctrl_port = info->snd_portid;
-		nla_strlcpy(name, info->attrs[IPCON_ATTR_GRP_NAME],
-				IPCON_MAX_NAME_LEN);
 
 		ipn = ipd_lookup_bycport(ipcon_db, ctrl_port);
 		if (!ipn) {
@@ -565,13 +602,13 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 
 		if (!is_publisher(ipn)) {
 			ipcon_err("%s: %s is not a publisher.\n",
-					__func__, ipn->name);
+				__func__, nc_refname(ipcon_nc, ipn->nameid));
 			ret = -EINVAL;
 			break;
 		}
 
 		ipn_wr_lock(ipn);
-		igi = ipn_lookup_byname(ipn, name);
+		igi = ipn_lookup_byname(ipn, nameid);
 		/*
 		 * Isolate this group from peer, so that no new group message
 		 * accepted. igi_del() can deal with NULL.
@@ -601,22 +638,26 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct genl_info *info)
 		/* clear users */
 		ipcon_clear_multicast_user(&ipcon_fam, igi->group);
 
-		ipcon_dbg("Group %s.%s@%d removed.\n",
-				ipn->name, igi->name, igi->group);
-
-		/* free igi */
-		igi_free(igi);
-
 		/* send group remove kevent */
 		iw = iw_alloc(ipcon_kevent_worker, sizeof(*ik), GFP_KERNEL);
 		if (iw) {
 			ik = iw->data;
 
 			ik->type = IPCON_EVENT_GRP_REMOVE;
-			strcpy(ik->group.name, name);
-			strcpy(ik->group.peer_name, ipn->name);
+			nc_getname(ipcon_nc, igi->nameid, ik->group.name);
+			nc_getname(ipcon_nc, ipn->nameid, ik->group.peer_name);
+
+			ipcon_dbg("Group %s.%s@%d removed.\n",
+				ik->group.peer_name,
+				ik->group.name,
+				igi->group);
+
 			queue_work(ipcon_db->mc_wq, &iw->work);
 		}
+
+		/* free igi */
+		nc_id_put(ipcon_nc, igi->nameid);
+		igi_free(igi);
 
 		/* mark group id be reusable. */
 		unreg_group(ipcon_db, igi->group);
@@ -643,6 +684,8 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 	struct ipcon_peer_node *self = NULL;
 	struct ipcon_group_info *igi = NULL;
 	unsigned int group = 0;
+	int grp_nameid = 0;
+	int srv_nameid = 0;
 
 	ipcon_dbg("enter.\n");
 
@@ -659,15 +702,30 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 	nla_strlcpy(name, info->attrs[IPCON_ATTR_GRP_NAME],
 			IPCON_MAX_NAME_LEN);
 
+	if (!valid_name(name))
+		return -EINVAL;
+
+	grp_nameid = nc_getid(ipcon_nc, name);
+	if (grp_nameid < 0)
+		return grp_nameid;
+
 	nla_strlcpy(srvname, info->attrs[IPCON_ATTR_SRV_NAME],
 			IPCON_MAX_NAME_LEN);
+
+	if (!valid_name(srvname))
+		return -EINVAL;
+
+	srv_nameid = nc_getid(ipcon_nc, srvname);
+	if (srv_nameid < 0)
+		return srv_nameid;
+
 
 	ipd_rd_lock(ipcon_db);
 	do {
 		self = ipd_lookup_bycport(ipcon_db, info->snd_portid);
 		BUG_ON(!self);
 
-		ipn = ipd_lookup_byname(ipcon_db, srvname);
+		ipn = ipd_lookup_byname(ipcon_db, srv_nameid);
 		if (!ipn) {
 			ret = -ESRCH;
 			break;
@@ -679,7 +737,7 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 			break;
 		}
 
-		igi = ipn_lookup_byname(ipn, name);
+		igi = ipn_lookup_byname(ipn, grp_nameid);
 		if (!igi) {
 			ret = -ESRCH;
 			break;
@@ -734,6 +792,7 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct genl_info *info)
 	struct ipcon_peer_node *ipn = NULL;
 	u32 tport = 0;
 	struct sk_buff *msg = skb_clone(skb, GFP_KERNEL);
+	int nameid = 0;
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
 		!info->attrs[IPCON_ATTR_PEER_NAME] ||
@@ -754,33 +813,36 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct genl_info *info)
 	if (!strcmp(IPCON_NAME, name))
 		return -EINVAL;
 
+	if (!valid_name(name))
+		return -EINVAL;
+
+	nameid = nc_getid(ipcon_nc, name);
+	if (nameid < 0)
+		return nameid;
+
 	ipd_rd_lock(ipcon_db);
 	do {
-
 		self = ipd_lookup_bycport(ipcon_db, info->snd_portid);
 		BUG_ON(!self);
 
-		ipn = ipd_lookup_byname(ipcon_db, name);
+		ipn = ipd_lookup_byname(ipcon_db, nameid);
 		if (!ipn) {
-			ipcon_err("%s: Peer %s not found.\n", __func__, name);
+			ipcon_err("%s: Peer %s not found.\n",
+				__func__, name);
+
 			ret = -ESRCH;
 			break;
 		}
 
 		if (!can_rcv_msg(ipn)) {
 			ipcon_err("%s: %s can not receive mesage.\n",
-					__func__, ipn->name);
+				__func__, name);
 
 			ret = -EPERM;
 			break;
 		}
 
 		tport = ipn->port;
-		ipcon_dbg("Msg %s@%lu --> %s@%lu\n",
-				self->name,
-				(unsigned long)self->port,
-				ipn->name,
-				(unsigned long)ipn->port);
 	} while (0);
 	ipd_rd_unlock(ipcon_db);
 
@@ -803,6 +865,7 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 	struct sk_buff *msg = skb_clone(skb, GFP_KERNEL);
 	struct ipcon_work *iw = NULL;
 	int sync = 0;
+	int nameid = 0;
 
 	if (!info->attrs[IPCON_ATTR_MSG_TYPE] ||
 		!info->attrs[IPCON_ATTR_GRP_NAME] ||
@@ -820,8 +883,12 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 	nla_strlcpy(name, info->attrs[IPCON_ATTR_GRP_NAME],
 			IPCON_MAX_NAME_LEN);
 
-	if (!strcmp(IPCON_KERNEL_GROUP, name))
+	if (!valid_name(name))
 		return -EINVAL;
+
+	nameid = nc_getid(ipcon_nc, name);
+	if (nameid < 0)
+		return nameid;
 
 	if (info->attrs[IPCON_ATTR_FLAG])
 		sync = 1;
@@ -836,13 +903,14 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct genl_info *info)
 
 		if (!is_publisher(ipn)) {
 			ipcon_err("%s: %s is not a publisher.\n",
-					__func__, ipn->name);
+				__func__, nc_refname(ipcon_nc, ipn->nameid));
+
 			ret = -EPERM;
 			break;
 		}
 
 		ipn_rd_lock(ipn);
-		igi = ipn_lookup_byname(ipn, name);
+		igi = ipn_lookup_byname(ipn, nameid);
 		if (igi)
 			atomic_inc(&igi->msg_sending_cnt);
 		else
@@ -910,6 +978,7 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 	struct ipcon_kevent *ik;
 	struct ipcon_work *iw = NULL;
 	u32 peer_type = 0;
+	int nameid = 0;
 
 	ipcon_dbg("%s enter.\n", __func__);
 
@@ -919,26 +988,29 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 		!info->attrs[IPCON_ATTR_PEER_NAME])
 		return -EINVAL;
 
+	port = nla_get_u32(info->attrs[IPCON_ATTR_PORT]);
+	if (!port)
+		return -EINVAL;
+
+
+	nla_strlcpy(name, info->attrs[IPCON_ATTR_PEER_NAME],
+		IPCON_MAX_NAME_LEN);
+
+	if (!valid_name(name))
+		return -EINVAL;
+
+	nameid = nc_add(ipcon_nc, name, GFP_ATOMIC);
+	if (nameid < 0)
+		return nameid;
+
+	peer_type = nla_get_u32(info->attrs[IPCON_ATTR_PEER_TYPE]);
+	if (peer_type >= (u32)MAX_PEER_TYPE)
+		return -EINVAL;
+
 	ipd_wr_lock(ipcon_db);
 	do {
-		port = nla_get_u32(info->attrs[IPCON_ATTR_PORT]);
-		if (!port) {
-			ret = -EINVAL;
-			break;
-		}
 
-		nla_strlcpy(name, info->attrs[IPCON_ATTR_PEER_NAME],
-				IPCON_MAX_NAME_LEN);
-
-		peer_type = nla_get_u32(info->attrs[IPCON_ATTR_PEER_TYPE]);
-		if (peer_type >= (u32)MAX_PEER_TYPE) {
-			ret = -EINVAL;
-			ipcon_dbg("%s: Invalid peer type %lu.\n",
-				__func__, (unsigned long)peer_type);
-			break;
-		}
-
-		ipn = ipn_alloc(port, info->snd_portid, name,
+		ipn = ipn_alloc(port, info->snd_portid, nameid,
 				(enum peer_type)peer_type, GFP_ATOMIC);
 		if (!ipn) {
 			ret = -ENOMEM;
@@ -946,30 +1018,30 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 		}
 
 		ret = ipd_insert(ipcon_db, ipn);
-		if (ret < 0) {
-			ipn_free(ipn);
+		if (ret < 0)
 			break;
-		}
 
 		if (!try_module_get(THIS_MODULE)) {
 			ret = -ENOMEM;
-			ipn_free(ipn);
 			break;
-		}
-
-		if (is_service(ipn)) {
-			iw = iw_alloc(ipcon_kevent_worker,
-					sizeof(*ik), GFP_ATOMIC);
-			if (iw) {
-				ik = iw->data;
-				ik->type = IPCON_EVENT_PEER_ADD;
-				strcpy(ik->peer.name, ipn->name);
-				queue_work(ipcon_db->mc_wq, &iw->work);
-			}
 		}
 
 	} while (0);
 	ipd_wr_unlock(ipcon_db);
+
+	if (!ret) {
+		iw = iw_alloc(ipcon_kevent_worker,
+				sizeof(*ik), GFP_ATOMIC);
+		if (iw) {
+			ik = iw->data;
+			ik->type = IPCON_EVENT_PEER_ADD;
+			nc_getname(ipcon_nc, ipn->nameid, ik->peer.name);
+			queue_work(ipcon_db->mc_wq, &iw->work);
+		}
+	} else {
+		nc_id_put(ipcon_nc, nameid);
+		ipn_free(ipn);
+	}
 
 	ipcon_dbg("%s exit(%d).\n", __func__, ret);
 	return ret;
@@ -1031,40 +1103,69 @@ static int ipcon_kernel_init(void)
 	struct ipcon_group_info *igi = NULL;
 	struct ipcon_peer_node *ipn = NULL;
 	int ret = 0;
+	int kpeer_nameid = 0;
+	int kgroup_nameid = 0;
 
-	igi = igi_alloc(IPCON_KERNEL_GROUP, IPCON_KERNEL_GROUP_PORT,
-			GFP_KERNEL);
-	if (!igi)
-		return -ENOMEM;
+	do {
+		ipcon_nc = nch_alloc(GFP_KERNEL);
+		if (!ipcon_nc) {
+			ret = -ENOMEM;
+			break;
+		}
 
-	ipn = ipn_alloc(0, 0, IPCON_NAME, SERVICE_PUBLISHER, GFP_KERNEL);
-	if (!ipn) {
+		kpeer_nameid = nc_add(ipcon_nc, IPCON_NAME, GFP_KERNEL);
+		if (kpeer_nameid < 0) {
+			ret = kpeer_nameid;
+			break;
+		}
+
+		kgroup_nameid = nc_add(ipcon_nc, IPCON_KERNEL_GROUP,
+				GFP_KERNEL);
+		if (kgroup_nameid < 0) {
+			ret = kgroup_nameid;
+			break;
+		}
+
+
+		igi = igi_alloc(kgroup_nameid, IPCON_KERNEL_GROUP_PORT,
+				GFP_KERNEL);
+		if (!igi) {
+			ret = -ENOMEM;
+			break;
+		}
+
+		ipn = ipn_alloc(0, 0, kpeer_nameid,
+				SERVICE_PUBLISHER, GFP_KERNEL);
+		if (!ipn) {
+			ret = -ENOMEM;
+			break;
+		}
+
+		ret = ipn_insert(ipn, igi);
+		if (ret < 0)
+			break;
+
+		ipcon_db = ipd_alloc(GFP_KERNEL);
+		if (!ipcon_db) {
+			ret = -ENOMEM;
+			break;
+		}
+
+
+		ret = ipd_insert(ipcon_db, ipn);
+		if (ret < 0)
+			break;
+
+		reg_group(ipcon_db, IPCON_KERNEL_GROUP_PORT);
+
+	} while (0);
+
+	if (ret < 0) {
+		nch_free(ipcon_nc);
 		igi_free(igi);
-		return -ENOMEM;
-	}
-
-	ipcon_db = ipd_alloc(GFP_KERNEL);
-	if (!ipcon_db) {
-		ipn_free(ipn);
-		return -ENOMEM;
-	}
-
-	ret = ipn_insert(ipn, igi);
-	if (ret < 0) {
 		ipn_free(ipn);
 		ipd_free(ipcon_db);
-		return ret;
 	}
-
-	ret = ipd_insert(ipcon_db, ipn);
-	if (ret < 0) {
-		ipn_free(ipn);
-		ipd_free(ipcon_db);
-		ipcon_db = NULL;
-		return ret;
-	}
-
-	reg_group(ipcon_db, IPCON_KERNEL_GROUP_PORT);
 
 	return ret;
 }
@@ -1108,6 +1209,7 @@ void ipcon_genl_exit(void)
 	netlink_unregister_notifier(&ipcon_netlink_notifier);
 	genl_unregister_family(&ipcon_fam);
 	ipd_free(ipcon_db);
+	nch_free(ipcon_nc);
 }
 
 #if 0

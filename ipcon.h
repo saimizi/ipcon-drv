@@ -77,6 +77,21 @@ static inline int valid_user_ipcon_group(__u32 group)
 	return (group && valid_ipcon_group(group));
 }
 
+static inline int valid_name(char *name)
+{
+	int len = 0;
+
+	if (!name)
+		return 0;
+
+	len = (int)strlen(name);
+
+	if (!len || len > IPCON_MAX_NAME_LEN)
+		return 0;
+
+	return 1;
+}
+
 enum ipcon_kevent_type {
 	IPCON_EVENT_PEER_ADD,
 	IPCON_EVENT_PEER_REMOVE,
