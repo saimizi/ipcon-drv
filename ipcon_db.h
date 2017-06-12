@@ -5,14 +5,7 @@
 #ifndef __IPCON_TREE_H__
 #define __IPCON_TREE_H__
 
-#include <linux/version.h>
 #include <linux/hashtable.h>
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0)
-#include <linux/stringhash.h>
-#else
-#include <linux/dcache.h>
-#endif
 #include <linux/string.h>
 #include <linux/types.h>
 #include "ipcon.h"

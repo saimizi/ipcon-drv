@@ -1,6 +1,12 @@
 #ifndef __IPCON_NAME_CACHE_H__
 #define __IPCON_NAME_CACHE_H__
 
+#include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0)
+#include <linux/stringhash.h>
+#else
+#include <linux/dcache.h>
+#endif
 #include "ipcon.h"
 #include "ipcon_dbg.h"
 
