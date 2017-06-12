@@ -772,6 +772,9 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 		self = ipd_lookup_bycport(ipcon_db, info->snd_portid);
 		BUG_ON(!self);
 
+		/*
+		 * filter should be added before the ipn_lookup_byname()
+		 */
 		ipn_add_filter(self, IPCON_EVENT_GRP_ADD, srv_nameid,
 				grp_nameid, GFP_ATOMIC);
 		ipn_add_filter(self, IPCON_EVENT_PEER_REMOVE, srv_nameid,
@@ -799,6 +802,9 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 		ipn_rd_unlock(ipn);
 	} while (0);
 	ipd_rd_unlock(ipcon_db);
+
+	nc_id_put(srv_nameid);
+	nc_id_put(grp_nameid);
 
 	/*
 	 * Send group id to user land so that it can use it to do
