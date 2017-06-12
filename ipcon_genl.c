@@ -272,6 +272,7 @@ static void ipcon_notify_worker(struct work_struct *work)
 	struct ipcon_group_info *igi = NULL;
 	struct ipcon_kevent *ik = NULL;
 	int bkt = 0;
+	struct hlist_node *tmp;
 
 	if (!port)
 		return;
@@ -300,7 +301,8 @@ static void ipcon_notify_worker(struct work_struct *work)
 			break;
 
 		if (!hash_empty(ipn->ipn_group_ht)) {
-			hash_for_each(ipn->ipn_group_ht, bkt, igi, igi_hgroup) {
+			hash_for_each_safe(ipn->ipn_group_ht, bkt, tmp,
+					igi, igi_hgroup) {
 				struct ipcon_work *iw_mc = NULL;
 				DEFINE_WAIT(wait);
 
@@ -421,6 +423,7 @@ static int ipcon_peer_reslove(struct sk_buff *skb, struct genl_info *info)
 	char name[IPCON_MAX_NAME_LEN];
 	__u32 msg_type;
 	struct ipcon_peer_node *ipn = NULL;
+	struct ipcon_peer_node *self = NULL;
 	void *hdr;
 	int flag = 0;
 	int nameid = 0;
@@ -452,14 +455,22 @@ static int ipcon_peer_reslove(struct sk_buff *skb, struct genl_info *info)
 		 * if no namid found, no peer found, just return without
 		 * IPCON_ATTR_FLAG.
 		 */
-		nameid = nc_getid(name);
+		nameid = nc_add(name, GFP_KERNEL);
 		if (nameid > 0) {
 			ipd_rd_lock(ipcon_db);
+
+			self = ipd_lookup_bycport(ipcon_db, info->snd_portid);
+			ipn_add_filter(self, IPCON_EVENT_PEER_ADD, nameid,
+					0, GFP_ATOMIC);
+			ipn_add_filter(self, IPCON_EVENT_PEER_REMOVE, nameid,
+					0, GFP_ATOMIC);
+
 			ipn = ipd_lookup_byname(ipcon_db, nameid);
 			if (ipn)
 				flag = 1;
 			ipd_rd_unlock(ipcon_db);
 		}
+		nc_id_put(nameid);
 
 		msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
 		if (!msg) {
@@ -741,7 +752,7 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 	if (!valid_name(name))
 		return -EINVAL;
 
-	grp_nameid = nc_getid(name);
+	grp_nameid = nc_add(name, GFP_KERNEL);
 	if (grp_nameid < 0)
 		return grp_nameid;
 
@@ -751,7 +762,7 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 	if (!valid_name(srvname))
 		return -EINVAL;
 
-	srv_nameid = nc_getid(srvname);
+	srv_nameid = nc_add(srvname, GFP_KERNEL);
 	if (srv_nameid < 0)
 		return srv_nameid;
 
@@ -760,6 +771,11 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 	do {
 		self = ipd_lookup_bycport(ipcon_db, info->snd_portid);
 		BUG_ON(!self);
+
+		ipn_add_filter(self, IPCON_EVENT_GRP_ADD, srv_nameid,
+				grp_nameid, GFP_ATOMIC);
+		ipn_add_filter(self, IPCON_EVENT_PEER_REMOVE, srv_nameid,
+				grp_nameid, GFP_ATOMIC);
 
 		ipn = ipd_lookup_byname(ipcon_db, srv_nameid);
 		if (!ipn) {
@@ -1247,7 +1263,6 @@ int ipcon_genl_init(void)
 
 void ipcon_genl_exit(void)
 {
-
 	netlink_unregister_notifier(&ipcon_netlink_notifier);
 	genl_unregister_family(&ipcon_fam);
 	ipd_free(ipcon_db);

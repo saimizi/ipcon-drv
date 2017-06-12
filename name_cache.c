@@ -21,6 +21,12 @@ struct nc_head {
 	struct idr idr;
 };
 
+static inline void __nch_detach(struct nc_head *nch, struct nc_entry *nce)
+{
+	idr_remove(&nch->idr, nce->id);
+	hash_del(&nce->node);
+}
+
 static inline struct nc_head *nch_alloc(gfp_t flag)
 {
 	struct nc_head *nch = NULL;
@@ -39,15 +45,21 @@ static inline void nch_free(struct nc_head *nch)
 {
 	if (nch) {
 		struct nc_entry *nce = NULL;
-		int bkt;
+		struct hlist_node *tmp;
+		int bkt = 0;
+
+		write_lock(&nch->lock);
+		hash_for_each_safe(nch->name_hash, bkt, tmp, nce, node) {
+			if (!atomic_sub_and_test(1, &nce->refcnt))
+				ipcon_warn("name %s is freed with %d users.\n",
+					nce->name,
+					atomic_read(&nce->refcnt));
+			__nch_detach(nch, nce);
+			kfree(nce);
+		}
 
 		idr_destroy(&nch->idr);
-
-		if (!hash_empty(nch->name_hash))
-			hash_for_each(nch->name_hash, bkt, nce, node) {
-				hash_del(&nce->node);
-				kfree(nce);
-			}
+		write_unlock(&nch->lock);
 		kfree(nch);
 	}
 }
@@ -155,12 +167,6 @@ static inline int __nc_getname(struct nc_head *nch, int id, char *name)
 	read_unlock(&nch->lock);
 
 	return ret;
-}
-
-static inline void __nch_detach(struct nc_head *nch, struct nc_entry *nce)
-{
-	idr_remove(&nch->idr, nce->id);
-	hash_del(&nce->node);
 }
 
 static inline void __nc_name_get(struct nc_head *nch, char *name)

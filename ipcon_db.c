@@ -176,7 +176,9 @@ void ipn_remove_filter(struct ipcon_peer_node *ipn, enum ipcon_kevent_type type,
 
 void ipn_free(struct ipcon_peer_node *ipn)
 {
-	struct ipcon_group_info *igi;
+	struct ipcon_group_info *igi = NULL;
+	struct filter_node *fnd = NULL;
+	struct hlist_node *tmp;
 	unsigned long bkt;
 
 	if (!ipn)
@@ -184,9 +186,16 @@ void ipn_free(struct ipcon_peer_node *ipn)
 
 	ipn_del(ipn);
 	if (!hash_empty(ipn->ipn_group_ht))
-		hash_for_each(ipn->ipn_group_ht, bkt, igi, igi_hgroup) {
+		hash_for_each_safe(ipn->ipn_group_ht, bkt, tmp, igi, igi_hgroup)
 			igi_free(igi);
+
+	if (!hash_empty(ipn->filter_ht))
+		hash_for_each_safe(ipn->filter_ht, bkt, tmp, fnd, node) {
+			hash_del(&fnd->node);
+			nc_id_put(fnd->peer_nameid);
+			nc_id_put(fnd->group_nameid);
 		}
+
 
 	BUG_ON(!hash_empty(ipn->ipn_name_ht));
 	nc_id_put(ipn->nameid);
@@ -349,6 +358,7 @@ void ipd_free(struct ipcon_peer_db *ipd)
 	do {
 		struct ipcon_peer_node *ipn;
 		unsigned long bkt;
+		struct hlist_node *tmp;
 
 		flush_workqueue(ipd->notify_wq);
 		destroy_workqueue(ipd->notify_wq);
@@ -358,7 +368,8 @@ void ipd_free(struct ipcon_peer_db *ipd)
 
 		ipd_wr_lock(ipd)
 		if (!hash_empty(ipd->ipd_port_ht))
-			hash_for_each(ipd->ipd_port_ht, bkt, ipn, ipn_hport)
+			hash_for_each_safe(ipd->ipd_port_ht, bkt, tmp,
+					ipn, ipn_hport)
 				ipn_free(ipn);
 
 		BUG_ON(!hash_empty(ipd->ipd_cport_ht));

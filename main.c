@@ -26,8 +26,8 @@ static int ipcon_init(void)
 
 static void ipcon_exit(void)
 {
-	ipcon_info("exit.\n");
 	ipcon_genl_exit();
+	ipcon_info("exit.\n");
 }
 
 module_init(ipcon_init);
