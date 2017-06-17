@@ -17,7 +17,7 @@
  * This is the maximum length of user message
  * that ipcon supposed to carry.
  */
-#define IPCON_MAX_MSG_LEN	512
+#define IPCON_MAX_MSG_LEN	2048
 
 #define IPCON_HDR_SIZE	0
 
