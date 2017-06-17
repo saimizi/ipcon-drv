@@ -901,6 +901,12 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct genl_info *info)
 		}
 
 		tport = ipn->port;
+
+		ipcon_dbg("%s@%lu Unicast to %s@%lu.\n",
+				nc_refname(self->nameid),
+				(unsigned long)self->port,
+				nc_refname(ipn->nameid),
+				(unsigned long)ipn->port);
 	} while (0);
 	ipd_rd_unlock(ipcon_db);
 
