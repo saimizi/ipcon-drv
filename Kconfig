@@ -1,0 +1,10 @@
+#
+# IPCON
+#
+
+config IPCON 
+	bool "IPC Over Netlink(IPCON)"
+	default n
+	---help---
+	  IPC for user space based on netlink.
+	  If unsure, say N.
