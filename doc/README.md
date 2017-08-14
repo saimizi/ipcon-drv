@@ -10,7 +10,7 @@ This section describes the outline of IPCON driver. The following figure shows
 the software stack of IPCON:
 
  
-![ipcon_stack](/ipcon_stack.png)
+![ipcon_stack](ipcon_stack.png)
 
 
 As described in software stack, IPCON driver which is a generic netlink driver
