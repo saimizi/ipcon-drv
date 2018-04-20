@@ -1,29 +1,19 @@
 #ifndef __IPCON_NAME_CACHE_H__
 #define __IPCON_NAME_CACHE_H__
 
-#include <linux/version.h>
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0)
 #include <linux/stringhash.h>
-#else
-#include <linux/dcache.h>
-#endif
+#include <linux/ctype.h>
 #include "ipcon.h"
 #include "ipcon_dbg.h"
 
 
 static inline unsigned long str2hash(char *s)
 {
-	unsigned long hash = init_name_hash();
+	unsigned long hash = init_name_hash(0);
+	char *p = s;
 
-	while (*s) {
-		char c = *s;
-
-		if (c >= 'A' && c <= 'Z')
-			c += 'a' - 'A';
-
-		hash = partial_name_hash(c, hash);
-		s++;
-	}
+	while (*p)
+		hash = partial_name_hash(tolower(*p++), hash);
 
 	hash = end_name_hash(hash);
 

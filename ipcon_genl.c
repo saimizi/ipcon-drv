@@ -26,15 +26,7 @@
 #define UNUSED_GROUP_NAME	"ipconG"
 static struct genl_multicast_group ipcon_mcgroups[IPCON_MAX_GROUP];
 static struct ipcon_peer_db *ipcon_db;
-
-static struct genl_family ipcon_fam = {
-	.id = GENL_ID_GENERATE,
-	.name = IPCON_NAME,
-	.hdrsize = IPCON_HDR_SIZE,
-	.version = 1,
-	.maxattr = IPCON_ATTR_MAX,
-	.parallel_ops = false,	/* Consider to set it to true...*/
-};
+static struct genl_family ipcon_fam;
 
 static const struct nla_policy ipcon_policy[NUM_IPCON_ATTR] = {
 	[IPCON_ATTR_MSG_TYPE] = {.type = NLA_U32},
@@ -1253,6 +1245,18 @@ static int ipcon_kernel_init(void)
 	return ret;
 }
 
+static struct genl_family ipcon_fam = {
+	.name		= IPCON_NAME,
+	.hdrsize	= IPCON_HDR_SIZE,
+	.version	= 1,
+	.ops		= ipcon_ops,
+	.n_ops		= ARRAY_SIZE(ipcon_ops),
+	.mcgrps		= ipcon_mcgroups,
+	.n_mcgrps	= IPCON_MAX_GROUP,
+	.maxattr	= IPCON_ATTR_MAX,
+	.parallel_ops	= false,	/* Consider to set it to true...*/
+};
+
 int ipcon_genl_init(void)
 {
 	int ret = 0;
@@ -1270,8 +1274,7 @@ int ipcon_genl_init(void)
 			strcpy(ipcon_mcgroups[i].name, IPCON_KERNEL_GROUP);
 	}
 
-	ret = genl_register_family_with_ops_groups(&ipcon_fam, ipcon_ops,
-						ipcon_mcgroups);
+	ret = genl_register_family(&ipcon_fam);
 	if (ret) {
 		ipd_free(ipcon_db);
 		return ret;
