@@ -1244,6 +1244,30 @@ static int ipcon_kernel_init(void)
 	return ret;
 }
 
+int ipcon_mcast_bind(struct net *net, int group)
+{
+	struct sock *sk = net->genl_sock;
+	struct netlink_sock *nlk = nlk_sk(sk);
+	struct ipcon_peer_node *ipn = NULL;
+	int ret = 0;
+
+	ipd_rd_lock(ipcon_db);
+	ipn = ipd_lookup_byport(ipcon_db, nlk->portid);
+	ipd_rd_unlock(ipcon_db);
+
+	/*
+	 * Only IPCON netlink soket is permmited to join the IPCON socket's mc
+	 * group.
+	 */
+	if (!ipn) {
+		ipcon_err("Netlink socket %lu is not a ipcon socket\n.",
+				(unsigned long)nlk->portid);
+		ret = -EPERM;
+	}
+
+	return ret;
+}
+
 static struct genl_family ipcon_fam = {
 	.name		= IPCON_NAME,
 	.hdrsize	= IPCON_HDR_SIZE,
@@ -1254,6 +1278,7 @@ static struct genl_family ipcon_fam = {
 	.n_mcgrps	= IPCON_MAX_GROUP,
 	.maxattr	= IPCON_ATTR_MAX,
 	.parallel_ops	= false,	/* Consider to set it to true...*/
+	.mcast_bind	= ipcon_mcast_bind
 };
 
 int ipcon_genl_init(void)
