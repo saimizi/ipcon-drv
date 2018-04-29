@@ -131,7 +131,6 @@ static int ipcon_filter(struct sock *dsk, struct sk_buff *skb, void *data)
 		return skip;
 	}
 
-
 	ipcon_dbg("Multicast to %s@%lu.\n",
 			nc_refname(ipn->nameid),
 			(unsigned long)ipn->port);
@@ -782,7 +781,7 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 		 */
 		ipn_add_filter(self, IPCON_EVENT_GRP_ADD, srv_nameid,
 				grp_nameid, GFP_ATOMIC);
-		ipn_add_filter(self, IPCON_EVENT_PEER_REMOVE, srv_nameid,
+		ipn_add_filter(self, IPCON_EVENT_GRP_REMOVE, srv_nameid,
 				grp_nameid, GFP_ATOMIC);
 
 		ipn = ipd_lookup_byname(ipcon_db, srv_nameid);
