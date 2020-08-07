@@ -1122,43 +1122,36 @@ static const struct genl_ops ipcon_ops[] = {
 	{
 		.cmd = IPCON_PEER_RESLOVE,
 		.doit = ipcon_peer_reslove,
-		.policy = ipcon_policy,
 		/*.flags = GENL_ADMIN_PERM,*/
 	},
 	{
 		.cmd = IPCON_GRP_REG,
 		.doit = ipcon_grp_reg,
-		.policy = ipcon_policy,
 		/*.flags = GENL_ADMIN_PERM,*/
 	},
 	{
 		.cmd = IPCON_GRP_UNREG,
 		.doit = ipcon_grp_unreg,
-		.policy = ipcon_policy,
 		/*.flags = GENL_ADMIN_PERM,*/
 	},
 	{
 		.cmd = IPCON_GRP_RESLOVE,
 		.doit = ipcon_grp_reslove,
-		.policy = ipcon_policy,
 		/*.flags = GENL_ADMIN_PERM,*/
 	},
 	{
 		.cmd = IPCON_MULTICAST_MSG,
 		.doit = ipcon_multicast_msg,
-		.policy = ipcon_policy,
 		/*.flags = GENL_ADMIN_PERM,*/
 	},
 	{
 		.cmd = IPCON_USR_MSG,
 		.doit = ipcon_unicast_msg,
-		.policy = ipcon_policy,
 		/*.flags = GENL_ADMIN_PERM,*/
 	},
 	{
 		.cmd = IPCON_PEER_REG,
 		.doit = ipcon_peer_reg,
-		.policy = ipcon_policy,
 		/*.flags = GENL_ADMIN_PERM,*/
 	},
 };
@@ -1274,6 +1267,7 @@ static struct genl_family ipcon_fam = {
 	.version	= 1,
 	.ops		= ipcon_ops,
 	.n_ops		= ARRAY_SIZE(ipcon_ops),
+	.policy		= ipcon_policy,
 	.mcgrps		= ipcon_mcgroups,
 	.n_mcgrps	= IPCON_MAX_GROUP,
 	.maxattr	= IPCON_ATTR_MAX,
