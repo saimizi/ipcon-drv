@@ -8,7 +8,7 @@
 #include <net/genetlink.h>
 #include <asm/bitops.h>
 
-#include "af_netlink.h"
+#include "../af_netlink.h"
 
 #include "ipcon.h"
 #include "ipcon_genl.h"
