@@ -770,7 +770,6 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct genl_info *info)
 	if (srv_nameid < 0)
 		return srv_nameid;
 
-
 	ipd_rd_lock(ipcon_db);
 	do {
 		self = ipd_lookup_bycport(ipcon_db, info->snd_portid);
@@ -1121,38 +1120,45 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct genl_info *info)
 static const struct genl_ops ipcon_ops[] = {
 	{
 		.cmd = IPCON_PEER_RESLOVE,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit = ipcon_peer_reslove,
-		/*.flags = GENL_ADMIN_PERM,*/
+		.flags = GENL_ADMIN_PERM,
 	},
 	{
 		.cmd = IPCON_GRP_REG,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit = ipcon_grp_reg,
-		/*.flags = GENL_ADMIN_PERM,*/
+		.flags = GENL_ADMIN_PERM,
 	},
 	{
 		.cmd = IPCON_GRP_UNREG,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit = ipcon_grp_unreg,
-		/*.flags = GENL_ADMIN_PERM,*/
+		.flags = GENL_ADMIN_PERM,
 	},
 	{
 		.cmd = IPCON_GRP_RESLOVE,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit = ipcon_grp_reslove,
-		/*.flags = GENL_ADMIN_PERM,*/
+		.flags = GENL_ADMIN_PERM,
 	},
 	{
 		.cmd = IPCON_MULTICAST_MSG,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit = ipcon_multicast_msg,
-		/*.flags = GENL_ADMIN_PERM,*/
+		.flags = GENL_ADMIN_PERM,
 	},
 	{
 		.cmd = IPCON_USR_MSG,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit = ipcon_unicast_msg,
-		/*.flags = GENL_ADMIN_PERM,*/
+		.flags = GENL_ADMIN_PERM,
 	},
 	{
 		.cmd = IPCON_PEER_REG,
 		.doit = ipcon_peer_reg,
-		/*.flags = GENL_ADMIN_PERM,*/
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
+		.flags = GENL_ADMIN_PERM,
 	},
 };
 
