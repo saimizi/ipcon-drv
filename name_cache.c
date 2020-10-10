@@ -144,10 +144,10 @@ static inline int __nc_getid(struct nc_head *nch, char *name)
 			str2hash(name))
 		if (!strcmp(nce->name, name)) {
 			ret = nce->id;
+			atomic_inc(&nce->refcnt);
 			break;
 		}
 	read_unlock(&nch->lock);
-
 	return ret;
 }
 

@@ -1,8 +1,8 @@
 #ifndef __IPCON_GENL_H__
 #define __IPCON_GENL_H__
 
-int ipcon_genl_init(void);
-void ipcon_genl_exit(void);
+int ipcon_nl_init(void);
+void ipcon_nl_exit(void);
 
 #ifdef CONFIG_DEBUG_FS
 void ipcon_debugfs_lock_tree(int is_srv);

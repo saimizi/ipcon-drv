@@ -32,9 +32,9 @@ struct filter_node {
 struct ipcon_peer_node {
 	rwlock_t lock;
 	int nameid;
+	enum peer_type type;
 	__u32 port;
 	__u32 ctrl_port;
-	enum peer_type type;
 	DECLARE_HASHTABLE(ipn_name_ht, IPN_HASH_BIT);
 	DECLARE_HASHTABLE(ipn_group_ht, IPN_HASH_BIT);
 	DECLARE_HASHTABLE(filter_ht, IPN_HASH_BIT);
@@ -155,6 +155,7 @@ void igi_free(struct ipcon_group_info *igi);
 struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port,
 				int nameid, enum peer_type type, gfp_t flag);
 void ipn_free(struct ipcon_peer_node *ipn);
+int ipn_set_comm_port(struct ipcon_peer_node *ipn, _u32 port);
 struct ipcon_group_info *ipn_lookup_byname(struct ipcon_peer_node *ipn,
 					int nameid);
 struct ipcon_group_info *ipn_lookup_bygroup(struct ipcon_peer_node *ipn,
