@@ -855,14 +855,11 @@ static int ipcon_peer_reg(__u32 sender_port, struct ipcon_msghdr *imh,
 	ipcon_dbg("%s enter.\n", __func__);
 
 
-
-	if (imh->flags & IPCON_FLG_ANON_PEER) {
-		peer_type = PEER_TYPE_ANON;
-		sprintf(imh->peer_name, "ANON-%u", (unsigned int)sender_port);
-	} else {
-		if (!valid_name(imh->peer_name))
+	if (!valid_name(imh->peer_name))
 		return -EINVAL;
-	}
+
+	if (imh->flags & IPCON_FLG_ANON_PEER)
+		peer_type = PEER_TYPE_ANON;
 
 	nameid = nc_add(imh->peer_name, GFP_ATOMIC);
 	if (nameid < 0)
