@@ -5,6 +5,8 @@
 #ifndef __IPCON_H__
 #define __IPCON_H__
 
+#include <linux/slab.h>
+
 /* Netlink protocol id for ipcon */
 #define NETLINK_IPCON		29
 
@@ -50,8 +52,8 @@ struct ipcon_msghdr {
 	__u32 cmd;	/* ipcon command */
 	__u32 flags;	/* Flag used by command */
 	__u32 group;
-	char group_name[IPCON_MAX_SRV_NAME_LEN];
-	char peer_name[IPCON_MAX_SRV_NAME_LEN];
+	char group_name[IPCON_MAX_NAME_LEN];
+	char peer_name[IPCON_MAX_NAME_LEN];
 };
 
 
@@ -73,7 +75,7 @@ struct ipcon_msghdr {
 
 static inline size_t ipconmsg_size(struct ipcon_msghdr *imh)
 {
-	return IPCONMSG_SPACE(ipconh->size);
+	return IPCONMSG_SPACE(imh->size);
 }
 
 static inline struct ipcon_msghdr *alloc_ipconmsg(__u32 size, gfp_t flags)
@@ -86,7 +88,6 @@ static inline struct ipcon_msghdr *alloc_ipconmsg(__u32 size, gfp_t flags)
 	result = kmalloc(IPCONMSG_SPACE(size), flags);
 	if (result) {
 		memset(result, 0, sizeof(*result));
-		result->ipconmsg_len = IPCONMSG_SPACE(size);
 		result->size = size;
 		result->refcnt = 1;
 	}

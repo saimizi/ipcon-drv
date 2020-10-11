@@ -72,7 +72,7 @@ struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port,
 	return ipn;
 }
 
-int ipn_set_comm_port(struct ipcon_peer_node *ipn, _u32 port)
+int ipn_set_comm_port(struct ipcon_peer_node *ipn, __u32 port)
 {
 	if (!ipn)
 		return -EINVAL;

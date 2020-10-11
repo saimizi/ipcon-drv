@@ -1,4 +1,5 @@
 #include <linux/hashtable.h>
+#include <linux/idr.h>
 #include "ipcon.h"
 #include "ipcon_dbg.h"
 #include "name_cache.h"
