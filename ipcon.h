@@ -30,7 +30,6 @@ enum ipcon_msg_type {
 /* IPCON commands */
 enum {
 	IPCON_PEER_REG,
-	IPCON_PEER_REG_COMM,
 	IPCON_PEER_RESLOVE,
 	IPCON_GRP_REG,
 	IPCON_GRP_UNREG,
@@ -51,6 +50,7 @@ struct ipcon_msghdr {
 	__u32 refcnt;	/* Reference counter */
 	__u32 cmd;	/* ipcon command */
 	__u32 flags;	/* Flag used by command */
+	__u32 port;
 	__u32 group;
 	char group_name[IPCON_MAX_NAME_LEN];
 	char peer_name[IPCON_MAX_NAME_LEN];

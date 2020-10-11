@@ -858,6 +858,9 @@ static int ipcon_peer_reg(__u32 sender_port, struct ipcon_msghdr *imh,
 	if (!valid_name(imh->peer_name))
 		return -EINVAL;
 
+	if (!imh->port)
+		return -EINVAL;
+
 	if (imh->flags & IPCON_FLG_ANON_PEER)
 		peer_type = PEER_TYPE_ANON;
 
@@ -869,7 +872,7 @@ static int ipcon_peer_reg(__u32 sender_port, struct ipcon_msghdr *imh,
 	do {
 
 		/* Only ctrl port registered, communication port is dummy */
-		ipn = ipn_alloc(0, sender_port, nameid, peer_type, GFP_ATOMIC);
+		ipn = ipn_alloc(imh->port, sender_port, nameid, peer_type, GFP_ATOMIC);
 		if (!ipn) {
 			nc_id_put(nameid);
 			ret = -ENOMEM;
@@ -900,46 +903,6 @@ static int ipcon_peer_reg(__u32 sender_port, struct ipcon_msghdr *imh,
 	} else {
 		ipn_free(ipn);
 	}
-
-	nc_id_put(nameid);
-
-	ipcon_dbg("%s exit(%d).\n", __func__, ret);
-	return ret;
-}
-
-static int ipcon_peer_reg_comm(__u32 sender_port, struct ipcon_msghdr *imh,
-		struct ipcon_msghdr **ack)
-{
-	int ret = 0;
-	struct ipcon_peer_node *ipn = NULL;
-	int nameid = 0;
-
-	ipcon_dbg("%s enter.\n", __func__);
-
-	if (!valid_name(imh->peer_name))
-		return -EINVAL;
-
-	nameid = nc_getid(imh->peer_name);
-	if (nameid < 0)
-		return nameid;
-
-	ipd_wr_lock(ipcon_db);
-	do {
-
-		/* Only ctrl port registered, communication port is dummy */
-		ipn = ipd_lookup_byname(ipcon_db, nameid);
-		if (!ipn) {
-			ipcon_err("No ipn for %s found.", imh->peer_name);
-			ret = -EINVAL;
-			break;
-		}
-
-		ret = ipn_set_comm_port(ipn, sender_port);
-		if (ret < 0)
-			break;
-
-	} while (0);
-	ipd_wr_unlock(ipcon_db);
 
 	nc_id_put(nameid);
 
@@ -1069,9 +1032,6 @@ static int ipcon_ctl_handler(__u32 sender_port, struct ipcon_msghdr *imh)
 		switch (imh->cmd) {
 		case IPCON_PEER_REG:
 			ret = ipcon_peer_reg(sender_port, imh, &ack);
-			break;
-		case IPCON_PEER_REG_COMM:
-			ret = ipcon_peer_reg_comm(sender_port, imh, &ack);
 			break;
 		case IPCON_PEER_RESLOVE:
 			ret = ipcon_peer_reslove(sender_port, imh, &ack);

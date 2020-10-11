@@ -72,19 +72,6 @@ struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port,
 	return ipn;
 }
 
-int ipn_set_comm_port(struct ipcon_peer_node *ipn, __u32 port)
-{
-	if (!ipn)
-		return -EINVAL;
-
-	if (ipn->port > 0)
-		return -EINVAL;
-
-	ipn->port = port;
-
-	return 0;
-}
-
 /* Return 1 if should be dropped */
 int ipn_filter_kevent(struct ipcon_peer_node *ipn,
 		struct ipcon_kevent *ik)
