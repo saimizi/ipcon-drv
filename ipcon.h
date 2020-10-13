@@ -5,8 +5,6 @@
 #ifndef __IPCON_H__
 #define __IPCON_H__
 
-#include <linux/slab.h>
-
 /* Netlink protocol id for ipcon */
 #define NETLINK_IPCON		29
 
