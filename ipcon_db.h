@@ -16,10 +16,10 @@
 struct ipcon_group_info {
 	struct hlist_node igi_hname;
 	struct hlist_node igi_hgroup;
-	unsigned int group;
+	int group;
 	int nameid;
-	atomic_t msg_sending_cnt;
-	wait_queue_head_t wq;
+	atomic_t refcnt;
+	struct workqueue_struct *mc_wq;
 };
 
 struct filter_node {
@@ -52,7 +52,6 @@ struct ipcon_peer_db {
 	DECLARE_HASHTABLE(ipd_cport_ht, IPD_HASH_BIT);
 	rwlock_t group_bitmap_lock;
 	unsigned long group_bitmap[BITS_TO_LONGS(IPCON_MAX_GROUP)];
-	struct workqueue_struct *mc_wq;
 	struct workqueue_struct *notify_wq;
 };
 
@@ -155,6 +154,7 @@ void igi_free(struct ipcon_group_info *igi);
 struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port,
 				int nameid, enum peer_type type, gfp_t flag);
 void ipn_free(struct ipcon_peer_node *ipn);
+unsigned int ipn_nameid(struct ipcon_peer_node *ipn);
 struct ipcon_group_info *ipn_lookup_byname(struct ipcon_peer_node *ipn,
 					int nameid);
 struct ipcon_group_info *ipn_lookup_bygroup(struct ipcon_peer_node *ipn,

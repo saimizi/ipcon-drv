@@ -20,7 +20,7 @@ static inline unsigned long str2hash(char *s)
 	return hash;
 }
 
-void nc_id_get(int id);
+int nc_id_get(int id);
 void nc_id_put(int id);
 int nc_getid(char *name);
 int nc_getname(int id, char *name);

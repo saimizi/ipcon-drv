@@ -11,7 +11,8 @@
 #define NETLINK_IPCON		29
 
 #define IPCON_NAME		"ipcon"
-#define IPCON_KERNEL_GROUP	"ipcon_kevent"
+#define IPCON_KERNEL_GROUP	0
+#define IPCON_KERNEL_GROUP_NAME	"ipcon_kevent"
 #define IPCON_MAX_NAME_LEN	32
 #define IPCON_MAX_GROUP		128
 
@@ -46,99 +47,30 @@ enum {
 
 /* IPCON message format */
 struct ipcon_msghdr {
-	__u32 size;	/* User data real size */
-	__u32 refcnt;	/* Reference counter */
-	__u32 cmd;	/* ipcon command */
-	__u32 flags;	/* Flag used by command */
-	__u32 port;
-	__u32 group;
-	char group_name[IPCON_MAX_NAME_LEN];
-	char peer_name[IPCON_MAX_NAME_LEN];
+	__u8	cmd;	/* ipcon command */
+	__u8	version;
+	__u16	reserved;
 };
 
+enum {
+	IPCON_ATTR_UNSPEC,
+	IPCON_ATTR_PORT,
+	IPCON_ATTR_GROUP,
+	IPCON_ATTR_PEER_NAME,
+	IPCON_ATTR_GROUP_NAME,
+	IPCON_ATTR_DATA,
+	IPCON_ATTR_FLAG,
+	IPCON_ATTR_PEER_TYPE,
+	/* Add attr here */
 
-#define MAX_IPCON_MSG_PAYLOAD_SIZE	512
-#define MAX_IPCON_MSG_LEN \
-	(sizeof(struct ipcon_msghdr) + MAX_IPCON_MSG_PAYLOAD_SIZE)
+	IPCON_ATTR_AFTER_LAST,
+	NUM_IPCON_ATTR = IPCON_ATTR_AFTER_LAST,
+	IPCON_ATTR_MAX = IPCON_ATTR_AFTER_LAST - 1
+};
 
-#define IPCONMSG_ALIGNTO		4U
-#define IPCONMSG_ALIGN(len) \
-	(((len)+IPCONMSG_ALIGNTO-1) & ~(IPCONMSG_ALIGNTO-1))
-#define IPCONMSG_HDRLEN \
-	((int) IPCONMSG_ALIGN(sizeof(struct ipcon_msghdr)))
+#define MAX_IPCONMSG_DATA_SIZE	2048
+#define IPCONMSG_HDRLEN	NLMSG_ALIGN(sizeof(struct ipcon_msghdr))
 
-#define IPCONMSG_LENGTH(len) ((len) + IPCONMSG_HDRLEN)
-#define IPCONMSG_SPACE(len) IPCONMSG_ALIGN(IPCONMSG_LENGTH(len))
-#define IPCONMSG_DATA(ipconh) \
-		((void *)(((char *)ipconh) + IPCONMSG_LENGTH(0)))
-
-
-static inline size_t ipconmsg_size(struct ipcon_msghdr *imh)
-{
-	return IPCONMSG_SPACE(imh->size);
-}
-
-static inline struct ipcon_msghdr *alloc_ipconmsg(__u32 size, gfp_t flags)
-{
-	struct ipcon_msghdr *result = NULL;
-
-	if (size > MAX_IPCON_MSG_PAYLOAD_SIZE)
-		return NULL;
-
-	result = kmalloc(IPCONMSG_SPACE(size), flags);
-	if (result) {
-		memset(result, 0, sizeof(*result));
-		result->size = size;
-		result->refcnt = 1;
-	}
-
-	return result;
-}
-
-static inline void ipcon_ref(struct ipcon_msghdr **rim)
-{
-	struct ipcon_msghdr *im;
-
-	if (!rim || !(*rim))
-		return;
-
-	im = *rim;
-
-	im->refcnt++;
-}
-
-static inline void ipcon_unref(struct ipcon_msghdr **rim)
-{
-	struct ipcon_msghdr *im;
-
-	if (!rim || !(*rim))
-		return;
-
-	im = *rim;
-
-	if (im->refcnt)
-		im->refcnt--;
-
-	if (!im->refcnt) {
-		kfree(im);
-		*rim = NULL;
-	}
-}
-
-/*
- * This is the maximum length of user message
- * that ipcon supposed to carry.
- */
-#define IPCON_MAX_MSG_LEN	2048
-
-#define IPCON_HDR_SIZE	0
-
-/* IPCON_ATTR_MSG_TYPE */
-#define IPCON_MSG_UNICAST	1
-#define IPCON_MSG_MULTICAST	2
-
-/* IPCON_ATTR_SRV_GROUP */
-#define IPCON_KERNEL_GROUP_PORT	0
 
 static inline int valid_ipcon_group(__u32 group)
 {

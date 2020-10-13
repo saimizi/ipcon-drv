@@ -17,8 +17,12 @@ struct ipcon_group_info *igi_alloc(int nameid, unsigned int group, gfp_t flag)
 		igi->group = group;
 		INIT_HLIST_NODE(&igi->igi_hname);
 		INIT_HLIST_NODE(&igi->igi_hgroup);
-		atomic_set(&igi->msg_sending_cnt, 0);
-		init_waitqueue_head(&igi->wq);
+		atomic_set(&igi->refcnt, 1);
+		igi->mc_wq = create_workqueue(nc_refname(nameid));
+		if (!igi->mc_wq) {
+			kfree(igi);
+			igi = NULL;
+		}
 	}
 
 	return igi;
@@ -36,16 +40,29 @@ void igi_del(struct ipcon_group_info *igi)
 		hash_del(&igi->igi_hgroup);
 }
 
-void igi_free(struct ipcon_group_info *igi)
+void igi_get(struct ipcon_group_info *igi)
+{
+	atomic_inc(&igi->refcnt);
+}
+
+void igi_put(struct ipcon_group_info *igi)
 {
 	if (!igi)
 		return;
 
-	BUG_ON(atomic_read(&igi->msg_sending_cnt));
+	if (atomic_sub_and_test(1, &igi->refcnt)) {
+		igi_del(igi);
+		nc_id_put(igi->nameid);
 
-	igi_del(igi);
-	nc_id_put(igi->nameid);
-	kfree(igi);
+		flush_workqueue(igi->mc_wq);
+		destroy_workqueue(igi->mc_wq);
+		kfree(igi);
+	}
+}
+
+void igi_free(struct ipcon_group_info *igi)
+{
+	igi_put(igi);
 }
 
 struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port,
@@ -70,6 +87,11 @@ struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port,
 	}
 
 	return ipn;
+}
+
+unsigned int ipn_nameid(struct ipcon_peer_node *ipn)
+{
+	return nc_id_get(ipn->nameid);
 }
 
 /* Return 1 if should be dropped */
@@ -277,17 +299,8 @@ struct ipcon_peer_db *ipd_alloc(gfp_t flag)
 	hash_init(ipd->ipd_cport_ht);
 
 	do {
-		ipd->mc_wq = create_workqueue("ipcon_muticast");
-		if (!ipd->mc_wq) {
-			kfree(ipd);
-			ipd = NULL;
-			break;
-
-		}
-
 		ipd->notify_wq = create_workqueue("ipcon_notify");
 		if (!ipd->notify_wq) {
-			destroy_workqueue(ipd->mc_wq);
 			kfree(ipd);
 			ipd = NULL;
 		}
@@ -363,8 +376,6 @@ void ipd_free(struct ipcon_peer_db *ipd)
 		flush_workqueue(ipd->notify_wq);
 		destroy_workqueue(ipd->notify_wq);
 
-		flush_workqueue(ipd->mc_wq);
-		destroy_workqueue(ipd->mc_wq);
 
 		ipd_wr_lock(ipd)
 		if (!hash_empty(ipd->ipd_port_ht))
