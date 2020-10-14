@@ -7,14 +7,13 @@
 #include <net/netlink.h>
 #include <asm/bitops.h>
 
-#include "af_netlink.h"
-
 #include "ipcon.h"
 #include "ipcon_msg.h"
 #include "ipcon_nl.h"
 #include "ipcon_db.h"
 #include "name_cache.h"
 #include "ipcon_dbg.h"
+#include "../af_netlink.h"
 
 /* Reference
  * - inclue/net/netlink.h
