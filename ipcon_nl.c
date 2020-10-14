@@ -32,42 +32,42 @@ DEFINE_MUTEX(ipcon_mutex);
 
 static const struct nla_policy ipcon_policy[NUM_IPCON_ATTR] = {
 	[IPCON_ATTR_CPORT] = {
-		.type = NLA_U32
+		.type = NLA_U32,
 	},
 
 	[IPCON_ATTR_SPORT] = {
-		.type = NLA_U32
+		.type = NLA_U32,
 	},
 
 	[IPCON_ATTR_RPORT] = {
-		.type = NLA_U32
+		.type = NLA_U32,
 	},
 
 	[IPCON_ATTR_GROUP] = {
-		.type = NLA_U32
+		.type = NLA_U32,
 	},
 
 	[IPCON_ATTR_PEER_NAME] = {
 		.type = NLA_NUL_STRING,
-		.len = IPCON_MAX_NAME_LEN
+		.len = IPCON_MAX_NAME_LEN - 1,
 	},
 
 	[IPCON_ATTR_GROUP_NAME] = {
 		.type = NLA_NUL_STRING,
-		.len = IPCON_MAX_NAME_LEN
+		.len = IPCON_MAX_NAME_LEN - 1,
 	},
 
 	[IPCON_ATTR_DATA] = {
 		.type = NLA_BINARY,
-		.len = MAX_IPCONMSG_DATA_SIZE
+		.len = MAX_IPCONMSG_DATA_SIZE,
 	},
 
 	[IPCON_ATTR_FLAG] = {
-		.type =	NLA_U32
+		.type =	NLA_U32,
 	},
 
 	[IPCON_ATTR_PEER_TYPE] = {
-		.type = NLA_U32
+		.type = NLA_U32,
 	},
 };
 
