@@ -31,7 +31,15 @@ static struct ipcon_group_info *igi_kernel;
 DEFINE_MUTEX(ipcon_mutex);
 
 static const struct nla_policy ipcon_policy[NUM_IPCON_ATTR] = {
-	[IPCON_ATTR_PORT] = {
+	[IPCON_ATTR_CPORT] = {
+		.type = NLA_U32
+	},
+
+	[IPCON_ATTR_SPORT] = {
+		.type = NLA_U32
+	},
+
+	[IPCON_ATTR_RPORT] = {
 		.type = NLA_U32
 	},
 
@@ -63,8 +71,6 @@ static const struct nla_policy ipcon_policy[NUM_IPCON_ATTR] = {
 	},
 };
 
-
-
 static inline int is_anon(struct ipcon_peer_node *ipn)
 {
 	return (ipn->type == PEER_TYPE_ANON);
@@ -88,7 +94,7 @@ static int ipcon_filter(struct sock *dsk, struct sk_buff *skb, void *data)
 {
 	struct ipcon_peer_node *ipn = NULL;
 
-	ipn = ipd_lookup_byport(ipcon_db, nlk_sk(dsk)->portid);
+	ipn = ipd_lookup_byrport(ipcon_db, nlk_sk(dsk)->portid);
 	if (!ipn) {
 		ipcon_warn("Drop multicast msg to suspicious port %lu\n",
 			(unsigned long)nlk_sk(dsk)->portid);
@@ -138,7 +144,7 @@ static int ipcon_filter(struct sock *dsk, struct sk_buff *skb, void *data)
 
 	ipcon_dbg("Multicast to %s@%lu.\n",
 			nc_refname(ipn->nameid),
-			(unsigned long)ipn->port);
+			(unsigned long)ipn_rcvport(ipn));
 
 	return 0;
 }
@@ -220,14 +226,10 @@ static void ipcon_notify_worker(struct work_struct *work)
 	do {
 		struct ipcon_work *iw_mc = NULL;
 		/*
-		 * Since both ctrl port and com port resides in a single
-		 * peer, only use com port can remove peer node (ipn).
+		 * Only use ctrl port to remove peer node (ipn).
 		 */
-		ipd_wr_lock(ipcon_db);
-		ipn = ipd_lookup_byport(ipcon_db, port);
+		ipn = ipd_lookup_bycport(ipcon_db, port);
 		ipn_del(ipn);
-		ipd_wr_unlock(ipcon_db);
-
 		if (!ipn)
 			break;
 
@@ -364,11 +366,9 @@ static int ipcon_peer_reslove(struct sk_buff *skb)
 
 		nameid = nc_getid(name);
 		if (nameid > 0) {
-			ipd_rd_lock(ipcon_db);
 			ipn = ipd_lookup_byname(ipcon_db, nameid);
 			if (ipn)
 				ret = 0;
-			ipd_rd_unlock(ipcon_db);
 		}
 		nc_id_put(nameid);
 
@@ -393,13 +393,11 @@ static int ipn_reg_group(struct ipcon_peer_node *ipn, int nameid,
 			break;
 		}
 
-		ipn_wr_lock(ipn);
 		existed = ipn_lookup_byname(ipn, nameid);
 		if (!existed)
 			ret = ipn_insert(ipn, igi);
 		else
 			ret = -EEXIST;
-		ipn_wr_unlock(ipn);
 
 		if (ret < 0) {
 			igi_free(igi);
@@ -451,12 +449,11 @@ static int ipcon_grp_reg(struct sk_buff *skb)
 	if (id >= IPCON_MAX_GROUP)
 		return -ENOBUFS;
 
-	ipd_rd_lock(ipcon_db);
 	do {
-		ipn = ipd_lookup_bycport(ipcon_db, ipconmsg_sndport(skb));
+		ipn = ipd_lookup_bycport(ipcon_db, ipconmsg_srcport(skb));
 		if (!ipn) {
 			ipcon_err("No port %lu found\n.",
-				(unsigned long)ipconmsg_sndport(skb));
+				(unsigned long)ipconmsg_srcport(skb));
 			ret = -ESRCH;
 			break;
 		}
@@ -464,7 +461,6 @@ static int ipcon_grp_reg(struct sk_buff *skb)
 		ret = ipn_reg_group(ipn, nameid, id);
 
 	} while (0);
-	ipd_rd_unlock(ipcon_db);
 
 	if (ret < 0)
 		unreg_group(ipcon_db, id);
@@ -499,30 +495,26 @@ static int ipcon_grp_unreg(struct sk_buff *skb)
 	if (nameid < 0)
 		return nameid;
 
-	ipd_rd_lock(ipcon_db);
 	do {
 
 		ipn = ipd_lookup_bycport(ipcon_db,
-				ipconmsg_sndport(skb));
+				ipconmsg_srcport(skb));
 		if (!ipn) {
 			ret = -ESRCH;
 			break;
 		}
 
-		ipn_wr_lock(ipn);
 		igi = ipn_lookup_byname(ipn, nameid);
 		/*
 		 * Isolate this group from peer, so that no new group message
 		 * accepted. igi_del() can deal with NULL.
 		 */
 		igi_del(igi);
-		ipn_wr_unlock(ipn);
 
 		if (!igi)
 			ret = -ESRCH;
 
 	} while (0);
-	ipd_rd_unlock(ipcon_db);
 	nc_id_put(nameid);
 
 	if (!ret) {
@@ -599,7 +591,6 @@ static int ipcon_grp_reslove(struct sk_buff *skb)
 		return peer_nameid;
 	}
 
-	ipd_rd_lock(ipcon_db);
 	do {
 		ipn = ipd_lookup_byname(ipcon_db, peer_nameid);
 		if (!ipn) {
@@ -607,16 +598,13 @@ static int ipcon_grp_reslove(struct sk_buff *skb)
 			break;
 		}
 
-		ipn_rd_lock(ipn);
 		igi = ipn_lookup_byname(ipn, group_nameid);
 		if (igi)
 			group = igi->group;
 		else
 			ret = -ENOENT;
-		ipn_rd_unlock(ipn);
 
 	} while (0);
-	ipd_rd_unlock(ipcon_db);
 
 	nc_id_put(peer_nameid);
 	nc_id_put(group_nameid);
@@ -634,7 +622,7 @@ static int ipcon_grp_reslove(struct sk_buff *skb)
 			p = ipconmsg_put_ctl(msg, 0, IPCON_PEER_RESLOVE);
 			nla_put_u32(msg, IPCON_ATTR_GROUP, group);
 			ipconmsg_end(msg, p);
-			ret = ipcon_unicast(msg, ipconmsg_sndport(skb));
+			ret = ipcon_unicast(msg, ipconmsg_srcport(skb));
 
 		} while (0);
 
@@ -670,7 +658,7 @@ int ipcon_unicast(struct sk_buff *skb, __u32 port)
 	return ret;
 }
 
-int ipcon_multicast(struct sk_buff *skb, __u32 sndport,
+int ipcon_multicast(struct sk_buff *skb, __u32 exclusive_port,
 		__u32 group, gfp_t flags)
 {
 	int ret = 0;
@@ -685,7 +673,7 @@ int ipcon_multicast(struct sk_buff *skb, __u32 sndport,
 
 		/* nlmsg_unicast return 0 when success and negative on error */
 		ret = nlmsg_multicast(ipcon_nl_sock, skb,
-				sndport, group, flags);
+				exclusive_port, group, flags);
 
 	} while (0);
 
@@ -722,7 +710,6 @@ static int ipcon_unicast_msg(struct sk_buff *skb)
 	if (nameid < 0)
 		return nameid;
 
-	ipd_rd_lock(ipcon_db);
 	do {
 		void *p = NULL;
 		struct ipcon_peer_node *snd_ipn = NULL;
@@ -736,9 +723,9 @@ static int ipcon_unicast_msg(struct sk_buff *skb)
 			ret = -ESRCH;
 			break;
 		}
+		tport = ipn_rcvport(ipn);
 
-		tport = ipn->port;
-		snd_ipn = ipd_lookup_byport(ipcon_db, ipconmsg_sndport(skb));
+		snd_ipn = ipd_lookup_bysport(ipcon_db, ipconmsg_srcport(skb));
 		if (!snd_ipn) {
 			ret = -ESRCH;
 			break;
@@ -765,7 +752,6 @@ static int ipcon_unicast_msg(struct sk_buff *skb)
 		ret = ipcon_unicast(msg, tport);
 
 	} while (0);
-	ipd_rd_unlock(ipcon_db);
 	nc_id_put(nameid);
 
 	return ret;
@@ -803,27 +789,22 @@ static int ipcon_multicast_msg(struct sk_buff *skb)
 		return group_nameid;
 
 
-	ipd_rd_lock(ipcon_db);
 	do {
 		void *p = NULL;
 		struct sk_buff	*msg = NULL;
 
-		ipn = ipd_lookup_byport(ipcon_db, ipconmsg_sndport(skb));
+		ipn = ipd_lookup_bysport(ipcon_db, ipconmsg_srcport(skb));
 		if (!ipn) {
 			ret = -ESRCH;
 			break;
 		}
-
-
-		ipn_rd_lock(ipn);
 		peer_nameid = ipn_nameid(ipn);
+
 		igi = ipn_lookup_byname(ipn, group_nameid);
 		if (!igi) {
 			ret = -ESRCH;
 			break;
 		}
-		ipn_rd_unlock(ipn);
-
 
 		msg = ipconmsg_new(GFP_KERNEL);
 
@@ -851,7 +832,7 @@ static int ipcon_multicast_msg(struct sk_buff *skb)
 		 * unregister the group before the message is deliveried.
 		 */
 		if (sync) {
-			ret = ipcon_multicast(msg, ipconmsg_sndport(skb),
+			ret = ipcon_multicast(msg, ipn_rcvport(ipn),
 					igi->group, GFP_KERNEL);
 
 		} else {
@@ -867,13 +848,12 @@ static int ipcon_multicast_msg(struct sk_buff *skb)
 
 			imwd = iw->data;
 			imwd->igi = igi;
-			imwd->sender_port = ipconmsg_sndport(skb);
+			imwd->sender_port = ipn_rcvport(ipn);
 			imwd->skb = msg;
 			queue_work(igi->mc_wq, &iw->work);
 		}
 	} while (0);
 
-	ipd_rd_unlock(ipcon_db);
 	nc_id_put(group_nameid);
 	nc_id_put(peer_nameid);
 
@@ -890,7 +870,8 @@ static int ipcon_peer_reg(struct sk_buff *skb)
 	int nameid = 0;
 	struct nlattr *tb[NUM_IPCON_ATTR];
 	char name[IPCON_MAX_NAME_LEN];
-	__u32 com_port;
+	__u32 snd_port;
+	__u32 rcv_port;
 
 	ipcon_dbg("%s enter.\n", __func__);
 
@@ -898,11 +879,14 @@ static int ipcon_peer_reg(struct sk_buff *skb)
 	if (ret < 0)
 		return ret;
 
-	if (!tb[IPCON_ATTR_PEER_NAME] || !tb[IPCON_ATTR_PORT])
+	if (!tb[IPCON_ATTR_PEER_NAME] ||
+		!tb[IPCON_ATTR_SPORT] ||
+		!tb[IPCON_ATTR_RPORT])
 		return -EINVAL;
 
 	nla_strlcpy(name, tb[IPCON_ATTR_PEER_NAME], IPCON_MAX_NAME_LEN);
-	com_port = nla_get_u32(tb[IPCON_ATTR_PORT]);
+	snd_port = nla_get_u32(tb[IPCON_ATTR_SPORT]);
+	rcv_port = nla_get_u32(tb[IPCON_ATTR_RPORT]);
 
 	if (tb[IPCON_ATTR_FLAG] &&
 		(nla_get_u32(tb[IPCON_ATTR_FLAG]) &
@@ -913,11 +897,11 @@ static int ipcon_peer_reg(struct sk_buff *skb)
 	if (nameid < 0)
 		return nameid;
 
-	ipd_wr_lock(ipcon_db);
 	do {
 
-		ipn = ipn_alloc(com_port,
-				ipconmsg_sndport(skb),
+		ipn = ipn_alloc(ipconmsg_srcport(skb),
+				snd_port,
+				rcv_port,
 				nameid,
 				peer_type,
 				GFP_KERNEL);
@@ -938,7 +922,6 @@ static int ipcon_peer_reg(struct sk_buff *skb)
 		}
 
 	} while (0);
-	ipd_wr_unlock(ipcon_db);
 
 	if (!ret) {
 		iw = iw_alloc(ipcon_kevent_worker,
@@ -996,7 +979,7 @@ static int ipcon_kernel_init(void)
 			break;
 		}
 
-		ipn_kernel = ipn_alloc(0, 0, kpeer_nameid,
+		ipn_kernel = ipn_alloc(0, 0, 0, kpeer_nameid,
 				PEER_TYPE_NORMAL, GFP_KERNEL);
 		if (!ipn_kernel) {
 			ret = -ENOMEM;
@@ -1048,9 +1031,7 @@ static int ipcon_bind(struct net *net, int group)
 	struct ipcon_peer_node *ipn = NULL;
 	int ret = 0;
 
-	ipd_rd_lock(ipcon_db);
-	ipn = ipd_lookup_byport(ipcon_db, nlk->portid);
-	ipd_rd_unlock(ipcon_db);
+	ipn = ipd_lookup_byrport(ipcon_db, nlk->portid);
 
 	/*
 	 * Only IPCON netlink soket is permmited to join the IPCON socket's mc

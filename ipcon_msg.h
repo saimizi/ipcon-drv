@@ -17,7 +17,7 @@ static inline __u8 ipconmsg_cmd(struct sk_buff *skb)
 	return ipconmsg_hdr(skb)->cmd;
 }
 
-static inline __u32 ipconmsg_sndport(struct sk_buff *skb)
+static inline __u32 ipconmsg_srcport(struct sk_buff *skb)
 {
 	return nlmsg_hdr(skb)->nlmsg_pid;
 }

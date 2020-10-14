@@ -50,9 +50,10 @@ void *ipconmsg_put(struct sk_buff *skb, __u32 portid, __u32 seq,
 	struct nlmsghdr *nlh;
 	struct ipcon_msghdr *hdr;
 
+	if (!flags)
+		flags |= NLM_F_REQUEST;
+
 	nlh = nlmsg_put(skb, portid, seq, type, IPCONMSG_HDRLEN, flags);
-	if (!flag)
-		flag != NLM_F_REQUEST;
 
 	if (nlh) {
 		hdr = (struct ipcon_msghdr *)nlmsg_data(nlh);
