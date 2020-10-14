@@ -65,10 +65,6 @@ static const struct nla_policy ipcon_policy[NUM_IPCON_ATTR] = {
 	[IPCON_ATTR_FLAG] = {
 		.type =	NLA_U32,
 	},
-
-	[IPCON_ATTR_PEER_TYPE] = {
-		.type = NLA_U32,
-	},
 };
 
 static inline int is_anon(struct ipcon_peer_node *ipn)
@@ -1024,32 +1020,6 @@ static void ipcon_kernel_destroy(void)
 	ipd_free(ipcon_db);
 }
 
-static int ipcon_bind(struct net *net, int group)
-{
-	struct sock *sk = net->genl_sock;
-	struct netlink_sock *nlk = nlk_sk(sk);
-	struct ipcon_peer_node *ipn = NULL;
-	int ret = 0;
-
-	ipn = ipd_lookup_byrport(ipcon_db, nlk->portid);
-
-	/*
-	 * Only IPCON netlink soket is permmited to join the IPCON socket's mc
-	 * group.
-	 */
-	if (!ipn) {
-		ipcon_err("Netlink socket %lu is not a ipcon socket\n.",
-				(unsigned long)nlk->portid);
-		ret = -EPERM;
-	}
-
-	return ret;
-}
-
-static void ipcon_unbind(struct net *net, int group)
-{
-}
-
 static int ipcon_ctl_handler(struct sk_buff *skb)
 {
 	int ret = 0;
@@ -1147,8 +1117,6 @@ int ipcon_nl_init(void)
 		.input  = ipcon_nl_rcv_msg,
 		.groups	= IPCON_MAX_GROUP,
 		.flags	= NL_CFG_F_NONROOT_RECV,
-		.bind	= ipcon_bind,
-		.unbind	= ipcon_unbind,
 	};
 
 	ipcon_nl_sock = netlink_kernel_create(&init_net, NETLINK_IPCON, &cfg);
