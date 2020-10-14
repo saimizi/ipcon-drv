@@ -36,11 +36,13 @@ void igi_del(struct ipcon_group_info *igi)
 
 	if (igi->ipn)
 		ipn_wr_lock(igi->ipn)
+
 	if (hash_hashed(&igi->igi_hname))
 		hash_del(&igi->igi_hname);
 
 	if (hash_hashed(&igi->igi_hgroup))
 		hash_del(&igi->igi_hgroup);
+
 	if (igi->ipn)
 		ipn_wr_unlock(igi->ipn)
 }
@@ -227,7 +229,6 @@ void ipn_free(struct ipcon_peer_node *ipn)
 		return;
 
 	ipn_del(ipn);
-	ipn_wr_lock(ipn);
 	if (!hash_empty(ipn->ipn_group_ht))
 		hash_for_each_safe(ipn->ipn_group_ht, bkt, tmp, igi, igi_hgroup)
 			igi_free(igi);
@@ -238,7 +239,6 @@ void ipn_free(struct ipcon_peer_node *ipn)
 			nc_id_put(fnd->peer_nameid);
 			nc_id_put(fnd->group_nameid);
 		}
-	ipn_wr_unlock(ipn);
 
 	BUG_ON(!hash_empty(ipn->ipn_name_ht));
 	nc_id_put(ipn->nameid);
@@ -260,12 +260,13 @@ struct ipcon_group_info *ipn_lookup_byname_internal(struct ipcon_peer_node *ipn,
 struct ipcon_group_info *ipn_lookup_byname(struct ipcon_peer_node *ipn,
 					int nameid)
 {
+	struct ipcon_group_info *igi = NULL;
 
 	ipn_rd_lock(ipn);
-	ipn_lookup_byname_internal(ipn, nameid);
+	igi = ipn_lookup_byname_internal(ipn, nameid);
 	ipn_rd_unlock(ipn);
 
-	return NULL;
+	return igi;
 }
 
 static struct ipcon_group_info *ipn_lookup_bygroup_internal(

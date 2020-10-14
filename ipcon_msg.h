@@ -19,7 +19,12 @@ static inline __u8 ipconmsg_cmd(struct sk_buff *skb)
 
 static inline __u32 ipconmsg_srcport(struct sk_buff *skb)
 {
-	return nlmsg_hdr(skb)->nlmsg_pid;
+	return NETLINK_CB(skb).portid;
+}
+
+static inline __u32 ipconmsg_seq(struct sk_buff *skb)
+{
+	return nlmsg_hdr(skb)->nlmsg_seq;
 }
 
 int ipconmsg_parse(struct sk_buff *skb,
@@ -30,14 +35,14 @@ struct sk_buff *ipconmsg_new(gfp_t flags);
 void *ipconmsg_put(struct sk_buff *skb, __u32 portid, __u32 seq,
 		enum ipcon_msg_type type, int flags, __u8 cmd);
 
-static inline void *ipconmsg_put_ctl(struct sk_buff *skb, int flags, __u8 cmd)
+static inline void *ipconmsg_put_ctl(struct sk_buff *skb, __u32 seq, int flags, __u8 cmd)
 {
-	return ipconmsg_put(skb, 0, 0, IPCON_TYPE_CTL, flags, cmd);
+	return ipconmsg_put(skb, 0, seq, IPCON_TYPE_CTL, flags, cmd);
 }
 
-static inline void *ipconmsg_put_msg(struct sk_buff *skb, int flags, __u8 cmd)
+static inline void *ipconmsg_put_msg(struct sk_buff *skb, __u32 seq, int flags, __u8 cmd)
 {
-	return ipconmsg_put(skb, 0, 0, IPCON_TYPE_MSG, flags, cmd);
+	return ipconmsg_put(skb, 0, seq, IPCON_TYPE_MSG, flags, cmd);
 }
 
 /**

@@ -187,7 +187,7 @@ static void ipcon_kevent_worker(struct work_struct *work)
 			break;
 		}
 
-		p = ipconmsg_put_msg(msg, 0, IPCON_MULTICAST_MSG);
+		p = ipconmsg_put_msg(msg, 0, 0, IPCON_MULTICAST_MSG);
 
 		nla_put_string(msg, IPCON_ATTR_PEER_NAME, IPCON_NAME);
 		nla_put_string(msg, IPCON_ATTR_GROUP_NAME,
@@ -614,7 +614,9 @@ static int ipcon_grp_reslove(struct sk_buff *skb)
 				break;
 			}
 
-			p = ipconmsg_put_ctl(msg, 0, IPCON_PEER_RESLOVE);
+			p = ipconmsg_put_ctl(msg, ipconmsg_seq(skb), 0,
+					IPCON_PEER_RESLOVE);
+
 			nla_put_u32(msg, IPCON_ATTR_GROUP, group);
 			ipconmsg_end(msg, p);
 			ret = ipcon_unicast(msg, ipconmsg_srcport(skb));
@@ -733,7 +735,7 @@ static int ipcon_unicast_msg(struct sk_buff *skb)
 		}
 
 
-		p = ipconmsg_put_msg(msg, 0, IPCON_USR_MSG);
+		p = ipconmsg_put_msg(msg, ipconmsg_seq(skb), 0, IPCON_USR_MSG);
 
 		nla_put(msg, IPCON_ATTR_DATA,
 			nla_len(tb[IPCON_ATTR_DATA]),
@@ -803,7 +805,8 @@ static int ipcon_multicast_msg(struct sk_buff *skb)
 
 		msg = ipconmsg_new(GFP_KERNEL);
 
-		p = ipconmsg_put_msg(msg, 0, IPCON_MULTICAST_MSG);
+		p = ipconmsg_put_msg(msg, ipconmsg_seq(skb), 0,
+				IPCON_MULTICAST_MSG);
 		nla_put_string(msg, IPCON_ATTR_PEER_NAME,
 				nc_refname(peer_nameid));
 
@@ -1074,6 +1077,8 @@ static int ipcon_rcv(struct sk_buff *skb, struct nlmsghdr *nlh,
 	int ret = 0;
 	int type = nlh->nlmsg_type;
 
+	ipcon_dbg("enter\n");
+
 	switch (type) {
 	case IPCON_TYPE_CTL:
 		ret = ipcon_ctl_handler(skb);
@@ -1087,6 +1092,7 @@ static int ipcon_rcv(struct sk_buff *skb, struct nlmsghdr *nlh,
 
 	};
 
+	ipcon_dbg("ret = %d\n", ret);
 	return ret;
 }
 

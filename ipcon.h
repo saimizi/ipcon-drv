@@ -21,7 +21,7 @@ enum peer_type {
 };
 
 enum ipcon_msg_type {
-	IPCON_TYPE_CTL = 0,
+	IPCON_TYPE_CTL = 100,
 	IPCON_TYPE_MSG,
 	IPCON_TYPE_MAX,
 };
