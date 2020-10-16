@@ -338,7 +338,7 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 
 static int ipcon_peer_reslove(struct sk_buff *skb)
 {
-	int ret = -ENOENT;
+	int ret = 0;
 	struct ipcon_peer_node *ipn = NULL;
 	int nameid = 0;
 	char name[IPCON_MAX_NAME_LEN];
@@ -348,10 +348,12 @@ static int ipcon_peer_reslove(struct sk_buff *skb)
 		ret = ipconmsg_parse(skb, tb, IPCON_ATTR_MAX,
 				ipcon_policy, NULL);
 		if (ret < 0)
-			return ret;
+			break;
 
-		if (!tb[IPCON_ATTR_PEER_NAME])
-			return -EINVAL;
+		if (!tb[IPCON_ATTR_PEER_NAME]) {
+			ret = -EINVAL;
+			break;
+		}
 
 		nla_strlcpy(name, tb[IPCON_ATTR_PEER_NAME], IPCON_MAX_NAME_LEN);
 		if (!valid_name(name)) {
@@ -360,13 +362,16 @@ static int ipcon_peer_reslove(struct sk_buff *skb)
 		}
 
 		nameid = nc_getid(name);
-		if (nameid > 0) {
-			ipn = ipd_lookup_byname(ipcon_db, nameid);
-			if (ipn)
-				ret = 0;
+		if (nameid < 0) {
+			ret = -ENOENT;
+			break;
 		}
-		nc_id_put(nameid);
 
+		ipn = ipd_lookup_byname(ipcon_db, nameid);
+		if (!ipn)
+			ret = -ENOENT;
+
+		nc_id_put(nameid);
 	} while (0);
 
 	return ret;
@@ -734,8 +739,7 @@ static int ipcon_unicast_msg(struct sk_buff *skb)
 			break;
 		}
 
-
-		p = ipconmsg_put_msg(msg, ipconmsg_seq(skb), 0, IPCON_USR_MSG);
+		p = ipconmsg_put_msg(msg, 0, 0, IPCON_USR_MSG);
 
 		nla_put(msg, IPCON_ATTR_DATA,
 			nla_len(tb[IPCON_ATTR_DATA]),
@@ -805,8 +809,7 @@ static int ipcon_multicast_msg(struct sk_buff *skb)
 
 		msg = ipconmsg_new(GFP_KERNEL);
 
-		p = ipconmsg_put_msg(msg, ipconmsg_seq(skb), 0,
-				IPCON_MULTICAST_MSG);
+		p = ipconmsg_put_msg(msg, 0, 0, IPCON_MULTICAST_MSG);
 		nla_put_string(msg, IPCON_ATTR_PEER_NAME,
 				nc_refname(peer_nameid));
 
