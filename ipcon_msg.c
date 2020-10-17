@@ -34,31 +34,32 @@ struct sk_buff *ipconmsg_new(gfp_t flags)
 	return nlmsg_new(NLMSG_DEFAULT_SIZE, flags);
 }
 
+__u32 ipconmsg_global_seq;
+
 /**
  * ipconmsg_put - Add ipcon netlink header to netlink message
  * @skb: socket buffer holding the message
  * @portid: netlink portid of caller
  * @seq: sequence number (usually the one of the sender)
  * @flags: netlink message flags
- * @cmd: generic netlink command
  *
  * Returns pointer to user specific header
  */
 void *ipconmsg_put(struct sk_buff *skb, __u32 portid, __u32 seq,
-		enum ipcon_msg_type type, int flags, __u8 cmd)
+		enum ipcon_msg_type type, int flags)
 {
 	struct nlmsghdr *nlh;
-	struct ipcon_msghdr *hdr;
+	struct ipconmsghdr *hdr;
 
 	if (!flags)
 		flags |= NLM_F_REQUEST;
 
 	nlh = nlmsg_put(skb, portid, seq, type, IPCONMSG_HDRLEN, flags);
+	if (!nlh)
+		return NULL;
 
-	if (nlh) {
-		hdr = (struct ipcon_msghdr *)nlmsg_data(nlh);
-		hdr->cmd = cmd;
-	}
+	hdr = nlmsg_data(nlh);
+	hdr->reserved = ++ipconmsg_global_seq;
 
-	return (char *)hdr + IPCONMSG_HDRLEN;
+	return (char *) hdr + IPCONMSG_HDRLEN;
 }

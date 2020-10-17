@@ -114,6 +114,7 @@ unsigned int ipn_nameid(struct ipcon_peer_node *ipn)
 int ipn_filter_kevent(struct ipcon_peer_node *ipn,
 		struct ipcon_kevent *ik)
 {
+	int ret = 1;
 	int peer_nameid = 0;
 	int grp_nameid = 0;
 	struct filter_node *fnd = NULL;
@@ -131,8 +132,10 @@ int ipn_filter_kevent(struct ipcon_peer_node *ipn,
 			if (fnd->type != ik->type)
 				continue;
 
-			if (fnd->peer_nameid == peer_nameid)
-				return 0;
+			if (fnd->peer_nameid == peer_nameid) {
+				ret = 0;
+				break;
+			}
 		}
 		break;
 	case IPCON_EVENT_GRP_ADD:
@@ -146,53 +149,66 @@ int ipn_filter_kevent(struct ipcon_peer_node *ipn,
 
 			if (fnd->peer_nameid == peer_nameid &&
 				fnd->group_nameid == grp_nameid) {
-				return 0;
+				ret = 0;
+				break;
 			}
 		}
 		break;
 	}
 	ipn_rd_unlock(ipn);
 
-	return 1;
+	return ret;
 }
 
 int ipn_add_filter(struct ipcon_peer_node *ipn, enum ipcon_kevent_type type,
 		int peer_nameid, int group_nameid, gfp_t flag)
 {
+	int ret = 0;
 	struct filter_node *fnd = NULL;
 
-	if (!ipn)
-		return -EINVAL;
 
 	ipn_wr_lock(ipn);
-	/* if same filter has been added, just return success */
-	hash_for_each_possible(ipn->filter_ht, fnd, node, peer_nameid)
-		if (fnd->peer_nameid == peer_nameid &&
-			fnd->group_nameid == group_nameid &&
-			fnd->type == type)
-			return 0;
 
-	fnd = kmalloc(sizeof(*fnd), flag);
-	if (!fnd)
-		return -ENOMEM;
+	do {
+		if (!ipn) {
+			ret = -EINVAL;
+			break;
+		}
 
-	fnd->type = type;
-	nc_id_get(peer_nameid);
-	fnd->peer_nameid = peer_nameid;
+		/* if same filter has been added, just return success */
+		hash_for_each_possible(ipn->filter_ht, fnd, node, peer_nameid)
+			if (fnd->peer_nameid == peer_nameid &&
+				fnd->group_nameid == group_nameid &&
+				fnd->type == type) {
+				ret = 0;
+				goto finish;
+			}
 
-	if (type < IPCON_EVENT_GRP_ADD) {
-		fnd->group_nameid = 0;
-	} else {
-		nc_id_get(group_nameid);
-		fnd->group_nameid = group_nameid;
-	}
+		fnd = kmalloc(sizeof(*fnd), flag);
+		if (!fnd) {
+			ret = -ENOMEM;
+			break;
+		}
 
-	INIT_HLIST_NODE(&fnd->node);
+		fnd->type = type;
+		nc_id_get(peer_nameid);
+		fnd->peer_nameid = peer_nameid;
 
-	hash_add(ipn->filter_ht, &fnd->node, fnd->peer_nameid);
+		if (type < IPCON_EVENT_GRP_ADD) {
+			fnd->group_nameid = 0;
+		} else {
+			nc_id_get(group_nameid);
+			fnd->group_nameid = group_nameid;
+		}
+
+		INIT_HLIST_NODE(&fnd->node);
+
+		hash_add(ipn->filter_ht, &fnd->node, fnd->peer_nameid);
+	} while (0);
+finish:
 	ipn_wr_unlock(ipn);
 
-	return 0;
+	return ret;
 }
 
 void ipn_remove_filter(struct ipcon_peer_node *ipn, enum ipcon_kevent_type type,
@@ -298,19 +314,28 @@ struct ipcon_group_info *ipn_lookup_bygroup(struct ipcon_peer_node *ipn,
 
 int ipn_insert(struct ipcon_peer_node *ipn, struct ipcon_group_info *igi)
 {
-	if (hash_hashed(&igi->igi_hname))
-		return -EINVAL;
+	int ret = 0;
 
 	ipn_wr_lock(ipn);
-	if (ipn_lookup_byname_internal(ipn, igi->nameid) ||
-		ipn_lookup_bygroup_internal(ipn, igi->group))
-		return -EEXIST;
+	do {
 
-	hash_add(ipn->ipn_name_ht, &igi->igi_hname, igi->nameid);
-	hash_add(ipn->ipn_group_ht, &igi->igi_hgroup, igi->group);
+		if (hash_hashed(&igi->igi_hname)) {
+			ret = -EINVAL;
+			break;
+		}
+
+		if (ipn_lookup_byname_internal(ipn, igi->nameid) ||
+			ipn_lookup_bygroup_internal(ipn, igi->group)) {
+			ret = -EEXIST;
+			break;
+		}
+
+		hash_add(ipn->ipn_name_ht, &igi->igi_hname, igi->nameid);
+		hash_add(ipn->ipn_group_ht, &igi->igi_hgroup, igi->group);
+
+		igi->ipn = ipn;
+	} while (0);
 	ipn_wr_unlock(ipn);
-
-	igi->ipn = ipn;
 
 	return 0;
 }
@@ -461,29 +486,39 @@ struct ipcon_peer_node *ipd_lookup_byrport(struct ipcon_peer_db *ipd, u32 port)
 
 int ipd_insert(struct ipcon_peer_db *ipd, struct ipcon_peer_node *ipn)
 {
+	int ret = 0;
 
 	ipd_wr_lock(ipd);
-	if (hash_hashed(&ipn->ipn_hname) ||
-		hash_hashed(&ipn->ipn_hcport) ||
-		hash_hashed(&ipn->ipn_hsport) ||
-		hash_hashed(&ipn->ipn_hrport))
-		return -EINVAL;
 
-	if (ipd_lookup_byname_internal(ipd, ipn->nameid) ||
-		ipd_lookup_bycport_internal(ipd, ipn->ctrl_port) ||
-		ipd_lookup_bysport_internal(ipd, ipn->snd_port) ||
-		ipd_lookup_byrport_internal(ipd, ipn->rcv_port))
-		return -EEXIST;
+	do {
+		if (hash_hashed(&ipn->ipn_hname) ||
+			hash_hashed(&ipn->ipn_hcport) ||
+			hash_hashed(&ipn->ipn_hsport) ||
+			hash_hashed(&ipn->ipn_hrport)) {
+			ret = -EINVAL;
+			break;
+		}
 
-	hash_add(ipd->ipd_name_ht, &ipn->ipn_hname, ipn->nameid);
-	hash_add(ipd->ipd_sport_ht, &ipn->ipn_hsport, ipn->snd_port);
-	hash_add(ipd->ipd_cport_ht, &ipn->ipn_hcport, ipn->ctrl_port);
-	hash_add(ipd->ipd_rport_ht, &ipn->ipn_hrport, ipn->rcv_port);
+		if (ipd_lookup_byname_internal(ipd, ipn->nameid) ||
+			ipd_lookup_bycport_internal(ipd, ipn->ctrl_port) ||
+			ipd_lookup_bysport_internal(ipd, ipn->snd_port) ||
+			ipd_lookup_byrport_internal(ipd, ipn->rcv_port)) {
+			ret = -EEXIST;
+			break;
+		}
+
+		hash_add(ipd->ipd_name_ht, &ipn->ipn_hname, ipn->nameid);
+		hash_add(ipd->ipd_sport_ht, &ipn->ipn_hsport, ipn->snd_port);
+		hash_add(ipd->ipd_cport_ht, &ipn->ipn_hcport, ipn->ctrl_port);
+		hash_add(ipd->ipd_rport_ht, &ipn->ipn_hrport, ipn->rcv_port);
+
+		ipn->ipd = ipd;
+
+	} while (0);
+
 	ipd_wr_unlock(ipd);
 
-	ipn->ipd = ipd;
-
-	return 0;
+	return ret;
 }
 
 void ipd_free(struct ipcon_peer_db *ipd)

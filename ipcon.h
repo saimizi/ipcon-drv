@@ -20,15 +20,9 @@ enum peer_type {
 	PEER_TYPE_MAX,
 };
 
+/* IPCON Message types*/
 enum ipcon_msg_type {
-	IPCON_TYPE_CTL = 100,
-	IPCON_TYPE_MSG,
-	IPCON_TYPE_MAX,
-};
-
-/* IPCON commands */
-enum {
-	IPCON_PEER_REG,
+	IPCON_PEER_REG = 100,
 	IPCON_PEER_RESLOVE,
 	IPCON_GRP_REG,
 	IPCON_GRP_UNREG,
@@ -37,18 +31,11 @@ enum {
 
 	IPCON_USR_MSG,
 	IPCON_MULTICAST_MSG,
-	IPCON_CMD_MAX,
+	IPCON_TYPE_MAX,
 };
 
 #define IPCON_FLG_ANON_PEER		(1 << 0)
 #define IPCON_FLG_MULTICAST_SYNC	(1 << 1)
-
-/* IPCON message format */
-struct ipcon_msghdr {
-	__u8	cmd;	/* ipcon command */
-	__u8	version;
-	__u16	reserved;
-};
 
 enum {
 	IPCON_ATTR_UNSPEC,
@@ -67,8 +54,12 @@ enum {
 	IPCON_ATTR_MAX = IPCON_ATTR_AFTER_LAST - 1
 };
 
+struct ipconmsghdr {
+	__u32	reserved;
+};
+
 #define MAX_IPCONMSG_DATA_SIZE	2048
-#define IPCONMSG_HDRLEN	NLMSG_ALIGN(sizeof(struct ipcon_msghdr))
+#define IPCONMSG_HDRLEN	NLMSG_ALIGN(sizeof(struct ipconmsghdr*))
 
 
 static inline int valid_ipcon_group(__u32 group)
