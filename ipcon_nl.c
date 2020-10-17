@@ -609,7 +609,7 @@ static int ipcon_grp_reslove(struct sk_buff *skb)
 	nc_id_put(peer_nameid);
 	nc_id_put(group_nameid);
 
-	if (!ret) {
+	if (ret == 0) {
 		do {
 			struct sk_buff	*msg = ipconmsg_new(GFP_KERNEL);
 			void *p = NULL;
@@ -620,7 +620,7 @@ static int ipcon_grp_reslove(struct sk_buff *skb)
 			}
 
 			p = ipconmsg_put_ctl(msg, ipconmsg_seq(skb), 0,
-					IPCON_PEER_RESLOVE);
+					IPCON_GRP_RESLOVE);
 
 			nla_put_u32(msg, IPCON_ATTR_GROUP, group);
 			ipconmsg_end(msg, p);
