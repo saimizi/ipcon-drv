@@ -196,7 +196,7 @@ static void ipcon_kevent_worker(struct work_struct *work)
 
 		ipconmsg_end(msg, p);
 
-		ipcon_multicast(msg, 0, IPCON_KERNEL_GROUP, GFP_KERNEL);
+		ipcon_multicast(msg, 0, IPCON_KERNEL_GROUP + 1, GFP_KERNEL);
 
 		iw_free(iw);
 	} while (0);
@@ -231,9 +231,11 @@ static void ipcon_notify_worker(struct work_struct *work)
 		/* Decrease reference count */
 		module_put(THIS_MODULE);
 
+#if 0
 		/* No need notify user space for an anonymous peer */
 		if (is_anon(ipn))
 			break;
+#endif
 
 		if (!hash_empty(ipn->ipn_group_ht)) {
 			hash_for_each_safe(ipn->ipn_group_ht, bkt, tmp,
@@ -245,7 +247,7 @@ static void ipcon_notify_worker(struct work_struct *work)
 				flush_workqueue(igi->mc_wq);
 
 				/* clear users */
-				ipcon_clear_multicast_user(igi->group);
+				ipcon_clear_multicast_user(igi->group + 1);
 
 
 				ipcon_dbg("Group %s.%s@%d removed.\n",
@@ -525,7 +527,7 @@ static int ipcon_grp_unreg(struct sk_buff *skb)
 		flush_workqueue(igi->mc_wq);
 
 		/* clear users */
-		ipcon_clear_multicast_user(igi->group);
+		ipcon_clear_multicast_user(igi->group + 1);
 
 		/* send group remove kevent */
 		iw = iw_alloc(ipcon_kevent_worker, sizeof(*ik), GFP_KERNEL);
@@ -622,7 +624,7 @@ static int ipcon_grp_reslove(struct sk_buff *skb)
 			p = ipconmsg_put(msg, 0, ipconmsg_seq(skb),
 					IPCON_GRP_RESLOVE, 0);
 
-			nla_put_u32(msg, IPCON_ATTR_GROUP, group);
+			nla_put_u32(msg, IPCON_ATTR_GROUP, group + 1);
 			ipconmsg_end(msg, p);
 			ret = ipcon_unicast(msg, ipconmsg_srcport(skb));
 
