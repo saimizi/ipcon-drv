@@ -191,14 +191,21 @@ int ipn_add_filter(struct ipcon_peer_node *ipn, enum ipcon_kevent_type type,
 		}
 
 		fnd->type = type;
-		nc_id_get(peer_nameid);
-		fnd->peer_nameid = peer_nameid;
 
-		if (type < IPCON_EVENT_GRP_ADD) {
+		switch (fnd->type) {
+		case IPCON_EVENT_PEER_ADD:
+		case IPCON_EVENT_PEER_REMOVE:
+			nc_id_get(peer_nameid);
+			fnd->peer_nameid = peer_nameid;
 			fnd->group_nameid = 0;
-		} else {
+			break;
+		case IPCON_EVENT_GRP_ADD:
+		case IPCON_EVENT_GRP_REMOVE:
+			nc_id_get(peer_nameid);
+			fnd->peer_nameid = peer_nameid;
 			nc_id_get(group_nameid);
 			fnd->group_nameid = group_nameid;
+			break;
 		}
 
 		INIT_HLIST_NODE(&fnd->node);
