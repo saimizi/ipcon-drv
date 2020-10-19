@@ -1,6 +1,8 @@
 #ifndef __IPCON_GENL_H__
 #define __IPCON_GENL_H__
 
+#define IPCON_KERNEL_GROUP	1
+
 int ipcon_nl_init(void);
 void ipcon_nl_exit(void);
 

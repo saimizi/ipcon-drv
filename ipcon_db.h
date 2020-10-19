@@ -127,7 +127,7 @@ static inline int group_inuse(struct ipcon_peer_db *db, int group)
 static inline void reg_group(struct ipcon_peer_db *db, int group)
 {
 	write_lock(&db->group_bitmap_lock);
-	set_bit(group, db->group_bitmap);
+	set_bit(group - 1, db->group_bitmap);
 	write_unlock(&db->group_bitmap_lock);
 }
 
@@ -142,7 +142,7 @@ static inline int reg_new_group(struct ipcon_peer_db *db)
 		set_bit(group, db->group_bitmap);
 	write_unlock(&db->group_bitmap_lock);
 
-	return group;
+	return group + 1;
 }
 
 static inline void unreg_group(struct ipcon_peer_db *db, int group)

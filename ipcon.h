@@ -9,7 +9,6 @@
 #define NETLINK_IPCON		29
 
 #define IPCON_NAME		"ipcon"
-#define IPCON_KERNEL_GROUP	0
 #define IPCON_KERNEL_GROUP_NAME	"ipcon_kevent"
 #define IPCON_MAX_NAME_LEN	32
 #define IPCON_MAX_GROUP		128
