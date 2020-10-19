@@ -35,6 +35,7 @@ enum ipcon_msg_type {
 
 #define IPCON_FLG_ANON_PEER		(1 << 0)
 #define IPCON_FLG_MULTICAST_SYNC	(1 << 1)
+#define IPCON_FLG_DISABL_KEVENT_FILTER	(1 << 2)
 
 enum {
 	IPCON_ATTR_UNSPEC,

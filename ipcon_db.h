@@ -30,6 +30,7 @@ struct filter_node {
 	int group_nameid;
 };
 
+#define IPN_FLG_DISABLE_KEVENT_FILTER		(1 << 0)
 struct ipcon_peer_node {
 	rwlock_t lock;
 	int nameid;
@@ -45,6 +46,7 @@ struct ipcon_peer_node {
 	struct hlist_node ipn_hcport;
 	struct hlist_node ipn_hrport;
 	struct ipcon_peer_db *ipd;
+	unsigned long flags;
 };
 
 #define IPD_HASH_BIT	10
@@ -171,8 +173,10 @@ struct ipcon_group_info *igi_alloc(int nameid, unsigned int group, gfp_t flag);
 void igi_del(struct ipcon_group_info *igi);
 void igi_free(struct ipcon_group_info *igi);
 
-struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port, __u32 rcv_port,
-			int nameid, enum peer_type type, gfp_t flag);
+struct ipcon_peer_node *ipn_alloc(__u32 ctrl_port, __u32 snd_port,
+		__u32 rcv_port, int nameid, enum peer_type type,
+		unsigned long ipn_flags,  gfp_t flag);
+
 void ipn_free(struct ipcon_peer_node *ipn);
 unsigned int ipn_nameid(struct ipcon_peer_node *ipn);
 struct ipcon_group_info *ipn_lookup_byname(struct ipcon_peer_node *ipn,

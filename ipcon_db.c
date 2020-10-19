@@ -73,7 +73,8 @@ void igi_free(struct ipcon_group_info *igi)
 }
 
 struct ipcon_peer_node *ipn_alloc(__u32 ctrl_port, __u32 snd_port,
-		__u32 rcv_port, int nameid, enum peer_type type, gfp_t flag)
+		__u32 rcv_port, int nameid, enum peer_type type,
+		unsigned long ipn_flags,  gfp_t flag)
 {
 	struct ipcon_peer_node *ipn;
 
@@ -93,7 +94,9 @@ struct ipcon_peer_node *ipn_alloc(__u32 ctrl_port, __u32 snd_port,
 		INIT_HLIST_NODE(&ipn->ipn_hrport);
 		nc_id_get(nameid);
 		ipn->nameid = nameid;
+		ipn->flags = ipn_flags;
 		ipn->ipd = NULL;
+
 	}
 
 	return ipn;

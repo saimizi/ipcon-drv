@@ -88,6 +88,8 @@ void ipcon_clear_multicast_user(unsigned int group)
 static int ipcon_kevent_filter(struct sock *dsk, struct sk_buff *skb, void *data)
 {
 	struct ipcon_peer_node *ipn = NULL;
+	unsigned long ipn_flags;
+	int skip = 0;
 
 	ipn = ipd_lookup_byrport(ipcon_db, nlk_sk(dsk)->portid);
 	if (!ipn) {
@@ -96,9 +98,20 @@ static int ipcon_kevent_filter(struct sock *dsk, struct sk_buff *skb, void *data
 		return 1;
 	}
 
+	if (ipn  == ipn_kernel)
+		return 1;
+
+
 	/* data is only present for ipcon_kevent when sending ipcon kevent */
-	if (data) {
-		int skip = 0;
+	do {
+		ipn_rd_lock(ipn);
+		ipn_flags = ipn->flags;
+		ipn_rd_unlock(ipn);
+
+		if (ipn_flags & IPN_FLG_DISABLE_KEVENT_FILTER) {
+			skip = 0;
+			break;
+		}
 
 		skip = ipn_filter_kevent(ipn, data);
 		if (skip) {
@@ -134,14 +147,13 @@ static int ipcon_kevent_filter(struct sock *dsk, struct sk_buff *skb, void *data
 				peer_name,
 				group_name);
 		}
-		return skip;
-	}
+	} while (0);
 
 	ipcon_dbg("Multicast to %s@%lu.\n",
 			nc_refname(ipn->nameid),
 			(unsigned long)ipn_rcvport(ipn));
 
-	return 0;
+	return skip;
 }
 
 
@@ -874,7 +886,8 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 	char name[IPCON_MAX_NAME_LEN];
 	__u32 snd_port;
 	__u32 rcv_port;
-	__u32 peer_type_flag;
+	__u32 peer_flag;
+	unsigned long ipn_flag = 0;
 
 	ipcon_dbg("%s enter.\n", __func__);
 
@@ -892,9 +905,12 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 	rcv_port = nla_get_u32(tb[IPCON_ATTR_RPORT]);
 
 	if (tb[IPCON_ATTR_FLAG]) {
-		peer_type_flag = nla_get_u32(tb[IPCON_ATTR_FLAG]);
-		if (peer_type_flag | IPCON_FLG_ANON_PEER)
+		peer_flag = nla_get_u32(tb[IPCON_ATTR_FLAG]);
+		if (peer_flag & IPCON_FLG_ANON_PEER)
 			peer_type = PEER_TYPE_ANON;
+
+		if (peer_flag & IPCON_FLG_DISABL_KEVENT_FILTER)
+			ipn_flag |= IPN_FLG_DISABLE_KEVENT_FILTER;
 	}
 
 	nameid = nc_add(name, GFP_ATOMIC);
@@ -909,6 +925,7 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 				rcv_port,
 				nameid,
 				peer_type,
+				ipn_flag,
 				GFP_KERNEL);
 
 		if (!self) {
@@ -985,7 +1002,9 @@ static int ipcon_kernel_init(void)
 		}
 
 		ipn_kernel = ipn_alloc(0, 0, 0, kpeer_nameid,
-				PEER_TYPE_NORMAL, GFP_KERNEL);
+				PEER_TYPE_NORMAL,
+				0,
+				GFP_KERNEL);
 		if (!ipn_kernel) {
 			ret = -ENOMEM;
 			break;
@@ -1038,32 +1057,77 @@ static int ipcon_rcv(struct sk_buff *skb, struct nlmsghdr *nlh,
 
 	ipcon_dbg("enter\n");
 
-	self = ipd_lookup_bycport(ipcon_db, ipconmsg_srcport(skb));
-	if (!self && (type != IPCON_PEER_REG))
-		return -ENXIO;
-
 	switch (type) {
 	case IPCON_PEER_REG:
+		self = ipd_lookup_bycport(ipcon_db, ipconmsg_srcport(skb));
+		if (!self && (type != IPCON_PEER_REG)) {
+			ret = -ENXIO;
+			break;
+		}
+
 		ret = ipcon_peer_reg(skb, self);
 		break;
+
 	case IPCON_PEER_RESLOVE:
+		self = ipd_lookup_bycport(ipcon_db, ipconmsg_srcport(skb));
+		if (!self && (type != IPCON_PEER_REG)) {
+			ret = -ENXIO;
+			break;
+		}
+
 		ret = ipcon_peer_reslove(skb, self);
 		break;
+
 	case IPCON_GRP_REG:
+		self = ipd_lookup_bycport(ipcon_db, ipconmsg_srcport(skb));
+		if (!self && (type != IPCON_PEER_REG)) {
+			ret = -ENXIO;
+			break;
+		}
+
 		ret = ipcon_grp_reg(skb, self);
 		break;
+
 	case IPCON_GRP_UNREG:
+		self = ipd_lookup_bycport(ipcon_db, ipconmsg_srcport(skb));
+		if (!self && (type != IPCON_PEER_REG)) {
+			ret = -ENXIO;
+			break;
+		}
+
 		ret = ipcon_grp_unreg(skb, self);
 		break;
+
 	case IPCON_GRP_RESLOVE:
+		self = ipd_lookup_bycport(ipcon_db, ipconmsg_srcport(skb));
+		if (!self && (type != IPCON_PEER_REG)) {
+			ret = -ENXIO;
+			break;
+		}
+
 		ret = ipcon_grp_reslove(skb, self);
 		break;
+
 	case IPCON_USR_MSG:
+		self = ipd_lookup_bysport(ipcon_db, ipconmsg_srcport(skb));
+		if (!self) {
+			ret = -ENXIO;
+			break;
+		}
+
 		ret = ipcon_unicast_msg(skb, self);
 		break;
+
 	case IPCON_MULTICAST_MSG:
+		self = ipd_lookup_bysport(ipcon_db, ipconmsg_srcport(skb));
+		if (!self) {
+			ret = -ENXIO;
+			break;
+		}
+
 		ret = ipcon_multicast_msg(skb, self);
 		break;
+
 	default:
 		ipcon_err("Unknow msg type: %x\n", type);
 		ret = -EINVAL;
