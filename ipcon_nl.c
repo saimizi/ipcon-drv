@@ -234,9 +234,11 @@ static void ipcon_notify_worker(struct work_struct *work)
 	do {
 		struct ipcon_work *iw_mc = NULL;
 		/*
-		 * Only use ctrl port to remove peer node (ipn).
+		 * Only use rcv port to remove peer node (ipn).
+		 * Because ipcon_kevent_filter uses rport to judge suspicious
+		 * port.
 		 */
-		ipn = ipd_lookup_bycport(ipcon_db, port);
+		ipn = ipd_lookup_byrport(ipcon_db, port);
 		ipn_del(ipn);
 		if (!ipn)
 			break;
