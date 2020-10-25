@@ -726,7 +726,6 @@ int ipcon_multicast(struct sk_buff *skb, __u32 exclusive_port,
 static int ipcon_unicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self)
 {
 	int ret = 0;
-	char name[IPCON_MAX_NAME_LEN];
 	struct ipcon_peer_node *ipn = NULL;
 	u32 tport = 0;
 	int nameid = 0;
@@ -759,7 +758,7 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self)
 		ipn = ipd_lookup_byname(ipcon_db, nameid);
 		if (!ipn) {
 			ipcon_err("%s: Peer %s not found.\n",
-				__func__, name);
+				__func__, peer_name);
 
 			ret = -ESRCH;
 			break;
