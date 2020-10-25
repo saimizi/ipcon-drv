@@ -19,10 +19,9 @@ int ipconmsg_parse(struct sk_buff *skb,
 				const struct nla_policy *policy,
 				struct netlink_ext_ack *extack)
 {
-	return __nlmsg_parse(nlmsg_hdr(skb),
+	return nlmsg_parse(nlmsg_hdr(skb),
 			IPCONMSG_HDRLEN,
-			tb, maxtype,
-			policy, NL_VALIDATE_STRICT, extack);
+			tb, maxtype, policy, extack);
 }
 
 /**
