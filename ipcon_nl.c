@@ -1067,8 +1067,6 @@ static int ipcon_rcv(struct sk_buff *skb, struct nlmsghdr *nlh,
 	int type = nlh->nlmsg_type;
 	struct ipcon_peer_node *self = NULL;
 
-	ipcon_dbg("enter\n");
-
 	switch (type) {
 	case IPCON_PEER_REG:
 		self = ipd_lookup_bycport(ipcon_db, ipconmsg_srcport(skb));
@@ -1141,7 +1139,6 @@ static int ipcon_rcv(struct sk_buff *skb, struct nlmsghdr *nlh,
 
 	};
 
-	ipcon_dbg("ret = %d\n", ret);
 	return ret;
 }
 
