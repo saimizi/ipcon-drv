@@ -150,7 +150,7 @@ static inline int reg_new_group(struct ipcon_peer_db *db)
 static inline void unreg_group(struct ipcon_peer_db *db, int group)
 {
 	write_lock(&db->group_bitmap_lock);
-	clear_bit(group, db->group_bitmap);
+	clear_bit(group - 1, db->group_bitmap);
 	write_unlock(&db->group_bitmap_lock);
 }
 

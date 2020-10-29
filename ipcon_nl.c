@@ -558,11 +558,12 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct ipcon_peer_node *self)
 			queue_work(igi_kernel->mc_wq, &iw->work);
 		}
 
+		/* mark group id be reusable. */
+		unreg_group(ipcon_db, igi->group);
+
 		/* free igi */
 		igi_free(igi);
 
-		/* mark group id be reusable. */
-		unreg_group(ipcon_db, igi->group);
 	}
 
 	ipcon_dbg("exit (%d).\n", ret);
