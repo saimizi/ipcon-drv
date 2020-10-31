@@ -15,6 +15,10 @@
 #include "ipcon_dbg.h"
 #include "../af_netlink.h"
 
+#ifdef CONFIG_DEBUG_FS
+#include "ipcon_debugfs.h"
+#endif
+
 /* Reference
  * - inclue/net/netlink.h
  */
@@ -1184,6 +1188,7 @@ int ipcon_nl_init(void)
 	ret = netlink_register_notifier(&ipcon_netlink_notifier);
 	if (ret)
 		ipcon_kernel_destroy();
+
 
 	return ret;
 }

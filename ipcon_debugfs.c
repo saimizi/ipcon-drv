@@ -6,211 +6,78 @@
 #include <linux/slab.h>
 #include <linux/netlink.h>
 #include <net/netlink.h>
-#include <net/genetlink.h>
+#include <linux/hashtable.h>
 
-#include "ipcon_tree.h"
-#include "ipcon_genl.h"
+#include "ipcon.h"
+#include "ipcon_db.h"
 #include "ipcon_dbg.h"
 
 struct dentry *diret;
 struct dentry *service_num;
 struct dentry *group_num;
-struct dentry *services;
-struct dentry *groups;
-
-struct ipcon_debugfs_data {
-	int is_srv;
-};
+struct dentry *named_peers;
+struct dentry *anon_peers;
+u32 MaxGroupNum = IPCON_MAX_GROUP;
+u32 MaxNameLength = IPCON_MAX_NAME_LEN;
 
 static ssize_t entry_file_read(struct file *fp, char __user *user_buffer,
 				size_t count, loff_t *position)
 {
 	char buf[512];
 	char *p = NULL;
-	struct ipcon_debugfs_data *idd = file_inode(fp)->i_private;
-	struct ipcon_tree_node *nd = NULL;
+	struct ipcon_peer_node *ipn = file_inode(fp)->i_private;
 	ssize_t ret = 0;
-	__u32 group_offset = ipcon_get_family()->mcgrp_offset;
 	int len;
 
-	if (!idd)
+	if (!ipn)
 		return -EBADF;
 
-	ipcon_debugfs_lock_tree(idd->is_srv);
 
+	ipn_rd_lock(ipn);
 	do {
-		nd = ipcon_lookup_unlock(fp->f_path.dentry->d_iname,
-					idd->is_srv);
-		if (!nd) {
-			ret = -ENOENT;
-			break;
-		}
+		unsigned long bkt;
+		struct hlist_node *tmp;
+		struct ipcon_group_info *igi = NULL;
 
 		p = buf;
-		/* For a service entry, no last message. */
-		if (idd->is_srv) {
-			len = sprintf(p, "Name:\t\t%s\n", nd->name);
-			p += len;
-
-			len = sprintf(p, "ComPort:\t%lu\n",
-				(unsigned long)nd->port);
-			p += len;
-
-			len = sprintf(p, "CtlPort:\t%lu\n",
-				(unsigned long)nd->port);
-			p += len;
-			break;
-		}
-
-		/* For a group enter, show last message*/
-		len = sprintf(p, "Name:\t\t%s\n", nd->name);
-			p += len;
-
-		len = sprintf(p, "Group:\t\t%lu\n",
-			(unsigned long)(nd->port + group_offset));
+		/* Peer Name */
+		len = sprintf(p, "%-15s%s\n", "Name:",
+				nc_refname(ipn->nameid));
 		p += len;
 
-		len = sprintf(p, "CtlPort:\t%lu\n",
-			(unsigned long)nd->port);
+		/* Ctrl port */
+		len = sprintf(p, "%-15s%lu\n", "CtrlPort:",
+				(unsigned long)ipn->ctrl_port);
 		p += len;
 
-		if (nd->last_grp_msg) {
-			struct nlmsghdr *nlh = NULL;
-			struct nlattr *attrbuf[IPCON_ATTR_MAX + 1];
-			int hdrlen, err;
-			int datalen = 0;
-			char *data = NULL;
-			int i;
-			char tmpc;
+		/* Send port */
+		len = sprintf(p, "%-15s%lu\n", "SendPort:",
+				(unsigned long)ipn->snd_port);
+		p += len;
 
-			nlh = nlmsg_hdr(nd->last_grp_msg);
-			hdrlen = GENL_HDRLEN + ipcon_get_family()->hdrsize;
-			err = nlmsg_parse(nlh,
-					hdrlen,
-					attrbuf,
-					IPCON_ATTR_MAX,
-					ipcon_get_policy());
-			if (err < 0) {
-				ret = err;
-				break;
-			}
+		/* Receive port */
+		len = sprintf(p, "%-15s%lu\n", "RcvPort:",
+				(unsigned long)ipn->rcv_port);
+		p += len;
 
-			if (!attrbuf[IPCON_ATTR_DATA]) {
-				ret = -EINVAL;
-				break;
-			}
+		len = sprintf(p, "Groups:\n");
+		p += len;
 
-			datalen = nla_len(attrbuf[IPCON_ATTR_DATA]);
-			data = nla_data(attrbuf[IPCON_ATTR_DATA]);
-
-			len = sprintf(p, "Last msg in this group:\n");
+		hash_for_each_safe(ipn->ipn_group_ht, bkt, tmp, igi, igi_hgroup) {
+			len = sprintf(p, "%32s %d\n",
+				nc_refname(igi->nameid), igi->group);
 			p += len;
-			len = sprintf(p, "  Size: %lu\n  Dump first 20 byte:\n",
-						(unsigned long)datalen);
-			p += len;
-
-			if (nd->group) {
-
-				for (i = 0; i < datalen; i++) {
-					if (i > 20)
-						break;
-
-					if (data[i] == '\0')
-						tmpc = '0';
-					else
-						tmpc = data[i];
-
-					len = sprintf(p, "    0x%x(\'%c\')\n",
-							tmpc, tmpc);
-					p += len;
-				}
-
-				*p = '\n';
-				p++;
-				*p = '\0';
-			} else {
-				/*
-				 * Group 0: ipcon_kevent
-				 * grp.groupid in ik already includes
-				 * mcgrp_offset
-				 */
-				struct ipcon_kevent *ik =
-					(struct ipcon_kevent *) data;
-				char *event = NULL;
-				char *name = NULL;
-				__u32 port = 0;
-				__u32 group = 0;
-
-				switch (ik->type) {
-				case IPCON_EVENT_PEER_REMOVE:
-					event = "IPCON_EVENT_PEER_REMOVE";
-					name = "-";
-					port = ik->peer.portid;
-					group = 0;
-					break;
-				case IPCON_EVENT_SRV_ADD:
-					event = "IPCON_EVENT_SRV_ADD";
-					name = ik->srv.name;
-					port = ik->srv.portid;
-					group = 0;
-					break;
-				case IPCON_EVENT_SRV_REMOVE:
-					event = "IPCON_EVENT_SRV_REMOVE";
-					name = ik->srv.name;
-					port = ik->srv.portid;
-					group = 0;
-					break;
-				case IPCON_EVENT_GRP_ADD:
-					event = "IPCON_EVENT_GRP_ADD";
-					name = ik->grp.name;
-					group = ik->grp.groupid;
-					port = 0;
-					break;
-				case IPCON_EVENT_GRP_REMOVE:
-					event = "IPCON_EVENT_GRP_REMOVE";
-					name = ik->grp.name;
-					group = ik->grp.groupid;
-					port = 0;
-					break;
-				default:
-					event = "unknown";
-					break;
-				}
-
-				len = sprintf(p, "    Event:\t%s\n", event);
-				p += len;
-
-				len = sprintf(p, "    Name :\t%s\n", name);
-				p += len;
-
-				if (port) {
-					len = sprintf(p, "    Port :\t%lu\n",
-						(unsigned long)port);
-					p += len;
-				}
-
-				if (group) {
-					len = sprintf(p, "    Group:\t%lu\n",
-						(unsigned long)group);
-					p += len;
-				}
-
-			}
-
-
-		} else {
-			sprintf(p, "No msg cached in this group.\n");
 		}
+
 	} while (0);
+	ipn_rd_unlock(ipn);
 
-	ipcon_debugfs_unlock_tree(idd->is_srv);
 
-	if (!ret)
-		ret = simple_read_from_buffer(user_buffer,
-					count,
-					position,
-					buf,
-					strlen(buf) + 1);
+	ret = simple_read_from_buffer(user_buffer,
+				count,
+				position,
+				buf,
+				strlen(buf) + 1);
 
 	return ret;
 }
@@ -219,80 +86,64 @@ static const struct file_operations ipcon_debugfs_fops = {
 	.read = entry_file_read,
 };
 
-int __init ipcon_debugfs_init(__u32 *srv_num, __u32 *grp_num)
+int ipcon_debugfs_init(void)
 {
 	int ret = 0;
 
 	diret = debugfs_create_dir("ipcon", NULL);
 
-	if (srv_num)
-		service_num = debugfs_create_u32("ServiceNum",
-					0644,
-					diret,
-					srv_num);
+	debugfs_create_u32("MaxGroupNum",
+			0644,
+			diret,
+			&MaxGroupNum);
 
-	if (grp_num)
-		service_num = debugfs_create_u32("GroupNum",
-					0644,
-					diret,
-					grp_num);
+	debugfs_create_u32("MaxNameLength",
+			0644,
+			diret,
+			&MaxNameLength);
 
-	services = debugfs_create_dir("services", diret);
-	groups = debugfs_create_dir("groups", diret);
+	named_peers = debugfs_create_dir("NamedPeers", diret);
+	anon_peers= debugfs_create_dir("AnonPeers", diret);
 
 	return ret;
 }
 
-/*
- * This function is called from cp_insert(),
- * the corresponding lock has been done in such a case.
- */
-void ipcon_debugfs_add_entry(struct ipcon_tree_node *nd, int is_srv)
+void ipcon_debugfs_add_entry(struct ipcon_peer_node *ipn)
 {
 	struct dentry *d = NULL;
 	struct dentry *parent = NULL;
-	struct ipcon_debugfs_data *idd = NULL;
 
-	if (!nd)
+	if (!ipn)
 		return;
 
-	idd = kmalloc(sizeof(*idd), GFP_ATOMIC);
-	if (!idd)
-		return;
+	if (ipn->type == PEER_TYPE_NORMAL)
+		parent = named_peers;
+	else 
+		parent = anon_peers;
 
-	idd->is_srv = is_srv;
 
-	if (is_srv)
-		parent = services;
-	else
-		parent = groups;
-
-	d = debugfs_create_file(nd->name,
+	d = debugfs_create_file(nc_refname(ipn->nameid),
 				0644,
 				parent,
-				idd,
+				ipn,
 				&ipcon_debugfs_fops);
 
-	nd->priv = (void *)d;
+	ipn->d = d;
 }
 
-/*
- * This function is called from cp_detach_node(),
- * the corresponding lock has been done in such a case.
- */
-void ipcon_debugfs_remove_entry(struct ipcon_tree_node *nd)
+void ipcon_debugfs_remove_entry(struct ipcon_peer_node *ipn)
 {
 	struct dentry *d = NULL;
 
-	if (!nd)
+	if (!ipn)
 		return;
 
-	d = nd->priv;
+	d = ipn->d;
 	debugfs_remove(d);
-	nd->priv = NULL;
+	ipn->d = NULL;
 }
 
-void __exit ipcon_debugfs_exit(void)
+void ipcon_debugfs_exit(void)
 {
 	debugfs_remove_recursive(diret);
 }

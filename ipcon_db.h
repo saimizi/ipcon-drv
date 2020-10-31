@@ -47,6 +47,9 @@ struct ipcon_peer_node {
 	struct hlist_node ipn_hrport;
 	struct ipcon_peer_db *ipd;
 	unsigned long flags;
+#ifdef CONFIG_DEBUG_FS
+	struct dentry *d;
+#endif
 };
 
 #define IPD_HASH_BIT	10

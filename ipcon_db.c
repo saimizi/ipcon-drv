@@ -6,6 +6,10 @@
 #include <linux/errno.h>
 #include "ipcon_db.h"
 
+#ifdef CONFIG_DEBUG_FS
+#include "ipcon_debugfs.h"
+#endif
+
 struct ipcon_group_info *igi_alloc(int nameid, unsigned int group, gfp_t flag)
 {
 	struct ipcon_group_info *igi = NULL;
@@ -253,6 +257,10 @@ void ipn_free(struct ipcon_peer_node *ipn)
 
 	if (!ipn)
 		return;
+
+#ifdef CONFIG_DEBUG_FS
+	ipcon_debugfs_remove_entry(ipn);
+#endif
 
 	ipn_del(ipn);
 	if (!hash_empty(ipn->ipn_group_ht))
@@ -525,6 +533,10 @@ int ipd_insert(struct ipcon_peer_db *ipd, struct ipcon_peer_node *ipn)
 		ipn->ipd = ipd;
 
 	} while (0);
+
+#ifdef CONFIG_DEBUG_FS
+	ipcon_debugfs_add_entry(ipn);
+#endif
 
 	ipd_wr_unlock(ipd);
 
