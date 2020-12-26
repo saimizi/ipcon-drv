@@ -8,7 +8,11 @@
 #define ipcon_err	pr_err
 #define ipcon_warn	pr_warn
 #define ipcon_info	pr_info
+#ifdef DEBUG
 #define ipcon_dbg	pr_debug
+#else
+#define ipcon_dbg(fmt, ...)
+#endif
 
 #ifdef DEBUG_LOCK
 #define ipcon_dbg_lock(fmt, ...) \
