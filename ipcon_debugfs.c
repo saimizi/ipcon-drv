@@ -51,14 +51,18 @@ static ssize_t entry_file_read(struct file *fp, char __user *user_buffer,
 		p += len;
 
 		/* Send port */
-		len = sprintf(p, "%-15s%lu\n", "SendPort:",
+		if (ipn->snd_port != IPCON_INVALID_PORT) {
+			len = sprintf(p, "%-15s%lu\n", "SendPort:",
 				(unsigned long)ipn->snd_port);
-		p += len;
+			p += len;
+		}
 
 		/* Receive port */
-		len = sprintf(p, "%-15s%lu\n", "RcvPort:",
+		if (ipn->rcv_port != IPCON_INVALID_PORT) {
+			len = sprintf(p, "%-15s%lu\n", "RcvPort:",
 				(unsigned long)ipn->rcv_port);
-		p += len;
+			p += len;
+		}
 
 		len = sprintf(p, "Groups:\n");
 		p += len;

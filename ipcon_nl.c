@@ -245,12 +245,12 @@ static void ipcon_notify_worker(struct work_struct *work)
 
 	do {
 		struct ipcon_work *iw_mc = NULL;
+
 		/*
-		 * Only use rcv port to remove peer node (ipn).
-		 * Because ipcon_kevent_filter uses rport to judge suspicious
-		 * port.
+		 * Peer may does not have receive port or send port,
+		 * only use ctrl port to remove peer node
 		 */
-		ipn = ipd_lookup_byrport(ipcon_db, port);
+		ipn = ipd_lookup_bycport(ipcon_db, port);
 		ipn_del(ipn);
 		if (!ipn)
 			break;
@@ -922,9 +922,7 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 	if (ret < 0)
 		return ret;
 
-	if (!tb[IPCON_ATTR_PEER_NAME] ||
-		!tb[IPCON_ATTR_SPORT] ||
-		!tb[IPCON_ATTR_RPORT])
+	if (!tb[IPCON_ATTR_PEER_NAME])
 		return -EINVAL;
 
 	if (tb[IPCON_ATTR_FLAG]) {
@@ -936,10 +934,10 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 			ipn_flag |= IPN_FLG_DISABLE_KEVENT_FILTER;
 
 		if (peer_flag & IPCON_FLG_RCV_IF)
-			snd_port = nla_get_u32(tb[IPCON_ATTR_SPORT]);
+			rcv_port = nla_get_u32(tb[IPCON_ATTR_RPORT]);
 
 		if (peer_flag & IPCON_FLG_SND_IF)
-			rcv_port = nla_get_u32(tb[IPCON_ATTR_RPORT]);
+			snd_port = nla_get_u32(tb[IPCON_ATTR_SPORT]);
 	}
 
 	nla_strlcpy(name, tb[IPCON_ATTR_PEER_NAME], IPCON_MAX_NAME_LEN);
@@ -1090,7 +1088,10 @@ static int ipcon_rcv(struct sk_buff *skb, struct nlmsghdr *nlh,
 	switch (type) {
 	case IPCON_PEER_REG:
 		self = ipd_lookup_bycport(ipcon_db, ipconmsg_srcport(skb));
-		ret = ipcon_peer_reg(skb, self);
+		if (self)
+			ret = -EINVAL;
+		else
+			ret = ipcon_peer_reg(skb, self);
 		break;
 
 	case IPCON_PEER_RESLOVE:

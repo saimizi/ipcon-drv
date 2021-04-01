@@ -8,11 +8,8 @@
 #define ipcon_err	pr_err
 #define ipcon_warn	pr_warn
 #define ipcon_info	pr_info
-#ifdef DEBUG
-#define ipcon_dbg	pr_debug
-#else
-#define ipcon_dbg(fmt, ...)
-#endif
+#define ipcon_dbg(fmt, ...) \
+	pr_debug("[ipcon] %s-%d " fmt, __func__, __LINE__, ##__VA_ARGS__)
 
 #ifdef DEBUG_LOCK
 #define ipcon_dbg_lock(fmt, ...) \

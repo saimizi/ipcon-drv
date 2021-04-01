@@ -527,6 +527,7 @@ int ipd_insert(struct ipcon_peer_db *ipd, struct ipcon_peer_node *ipn)
 	ipd_wr_lock(ipd);
 
 	do {
+
 		if (hash_hashed(&ipn->ipn_hname) ||
 			hash_hashed(&ipn->ipn_hcport) ||
 			hash_hashed(&ipn->ipn_hsport) ||
@@ -544,9 +545,15 @@ int ipd_insert(struct ipcon_peer_db *ipd, struct ipcon_peer_node *ipn)
 		}
 
 		hash_add(ipd->ipd_name_ht, &ipn->ipn_hname, ipn->nameid);
-		hash_add(ipd->ipd_sport_ht, &ipn->ipn_hsport, ipn->snd_port);
 		hash_add(ipd->ipd_cport_ht, &ipn->ipn_hcport, ipn->ctrl_port);
-		hash_add(ipd->ipd_rport_ht, &ipn->ipn_hrport, ipn->rcv_port);
+
+		if (ipn->snd_port != IPCON_INVALID_PORT)
+			hash_add(ipd->ipd_sport_ht,
+				&ipn->ipn_hsport, ipn->snd_port);
+
+		if (ipn->rcv_port != IPCON_INVALID_PORT)
+			hash_add(ipd->ipd_rport_ht,
+				&ipn->ipn_hrport, ipn->rcv_port);
 
 		ipn->ipd = ipd;
 
