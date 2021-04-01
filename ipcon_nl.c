@@ -737,6 +737,8 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self)
 	struct nlattr *tb[NUM_IPCON_ATTR];
 	char peer_name[IPCON_MAX_NAME_LEN];
 
+	if (ipn_sndport(self) == IPCON_INVALID_PORT)
+		return -EPERM;
 
 	ret = ipconmsg_parse(skb, tb, IPCON_ATTR_MAX, ipcon_policy, NULL);
 	if (ret < 0)
@@ -769,6 +771,11 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self)
 			break;
 		}
 		tport = ipn_rcvport(ipn);
+		if (tport == IPCON_INVALID_PORT) {
+			ipcon_err("%s: Peer %s does not have rcv I/F.\n",
+				__func__, peer_name);
+			ret = -EPERM;
+		}
 
 		msg = ipconmsg_new(GFP_KERNEL);
 		if (!msg) {
@@ -804,6 +811,9 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self
 	struct nlattr *tb[NUM_IPCON_ATTR];
 	char group_name[IPCON_MAX_NAME_LEN];
 	int sync = 0;
+
+	if (ipn_sndport(self) == IPCON_INVALID_PORT)
+		return -EPERM;
 
 	ret = ipconmsg_parse(skb, tb, IPCON_ATTR_MAX, ipcon_policy, NULL);
 	if (ret < 0)
@@ -901,8 +911,8 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 	int nameid = 0;
 	struct nlattr *tb[NUM_IPCON_ATTR];
 	char name[IPCON_MAX_NAME_LEN];
-	__u32 snd_port;
-	__u32 rcv_port;
+	__u32 snd_port = IPCON_INVALID_PORT;
+	__u32 rcv_port = IPCON_INVALID_PORT;
 	__u32 peer_flag;
 	unsigned long ipn_flag = 0;
 
@@ -917,10 +927,6 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 		!tb[IPCON_ATTR_RPORT])
 		return -EINVAL;
 
-	nla_strlcpy(name, tb[IPCON_ATTR_PEER_NAME], IPCON_MAX_NAME_LEN);
-	snd_port = nla_get_u32(tb[IPCON_ATTR_SPORT]);
-	rcv_port = nla_get_u32(tb[IPCON_ATTR_RPORT]);
-
 	if (tb[IPCON_ATTR_FLAG]) {
 		peer_flag = nla_get_u32(tb[IPCON_ATTR_FLAG]);
 		if (peer_flag & IPCON_FLG_ANON_PEER)
@@ -928,7 +934,16 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 
 		if (peer_flag & IPCON_FLG_DISABL_KEVENT_FILTER)
 			ipn_flag |= IPN_FLG_DISABLE_KEVENT_FILTER;
+
+		if (peer_flag & IPCON_FLG_RCV_IF)
+			snd_port = nla_get_u32(tb[IPCON_ATTR_SPORT]);
+
+		if (peer_flag & IPCON_FLG_SND_IF)
+			rcv_port = nla_get_u32(tb[IPCON_ATTR_RPORT]);
 	}
+
+	nla_strlcpy(name, tb[IPCON_ATTR_PEER_NAME], IPCON_MAX_NAME_LEN);
+
 
 	nameid = nc_add(name, GFP_KERNEL);
 	if (nameid < 0)

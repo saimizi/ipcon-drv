@@ -439,6 +439,9 @@ static struct ipcon_peer_node *ipd_lookup_bysport_internal(
 {
 	struct ipcon_peer_node *ipn = NULL;
 
+	if (port == IPCON_INVALID_PORT)
+		return NULL;
+
 	hash_for_each_possible(ipd->ipd_sport_ht, ipn, ipn_hsport, port)
 		if (ipn->snd_port == port)
 			break;
@@ -449,6 +452,9 @@ static struct ipcon_peer_node *ipd_lookup_bysport_internal(
 struct ipcon_peer_node *ipd_lookup_bysport(struct ipcon_peer_db *ipd, u32 port)
 {
 	struct ipcon_peer_node *ipn = NULL;
+
+	if (port == IPCON_INVALID_PORT)
+		return NULL;
 
 	ipd_rd_lock(ipd);
 	ipn = ipd_lookup_bysport_internal(ipd, port);
@@ -462,6 +468,9 @@ static struct ipcon_peer_node *ipd_lookup_bycport_internal(
 {
 	struct ipcon_peer_node *ipn = NULL;
 
+	if (port == IPCON_INVALID_PORT)
+		return NULL;
+
 	hash_for_each_possible(ipd->ipd_cport_ht, ipn, ipn_hcport, port)
 		if (ipn->ctrl_port == port)
 			break;
@@ -472,6 +481,9 @@ static struct ipcon_peer_node *ipd_lookup_bycport_internal(
 struct ipcon_peer_node *ipd_lookup_bycport(struct ipcon_peer_db *ipd, u32 port)
 {
 	struct ipcon_peer_node *ipn = NULL;
+
+	if (port == IPCON_INVALID_PORT)
+		return NULL;
 
 	ipd_rd_lock(ipd);
 	ipn = ipd_lookup_bycport_internal(ipd, port);
@@ -485,6 +497,9 @@ static struct ipcon_peer_node *ipd_lookup_byrport_internal(
 {
 	struct ipcon_peer_node *ipn = NULL;
 
+	if (port == IPCON_INVALID_PORT)
+		return NULL;
+
 	hash_for_each_possible(ipd->ipd_rport_ht, ipn, ipn_hrport, port)
 		if (ipn->rcv_port == port)
 			break;
@@ -494,6 +509,9 @@ static struct ipcon_peer_node *ipd_lookup_byrport_internal(
 struct ipcon_peer_node *ipd_lookup_byrport(struct ipcon_peer_db *ipd, u32 port)
 {
 	struct ipcon_peer_node *ipn = NULL;
+
+	if (port == IPCON_INVALID_PORT)
+		return NULL;
 
 	ipd_rd_lock(ipd);
 	ipn = ipd_lookup_byrport_internal(ipd, port);

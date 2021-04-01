@@ -30,6 +30,7 @@ struct filter_node {
 	int group_nameid;
 };
 
+#define IPCON_INVALID_PORT	0xFFFFFFFF
 #define IPN_FLG_DISABLE_KEVENT_FILTER		(1 << 0)
 struct ipcon_peer_node {
 	rwlock_t lock;
