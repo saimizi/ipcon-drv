@@ -35,6 +35,8 @@ struct filter_node {
 struct ipcon_peer_node {
 	rwlock_t lock;
 	int nameid;
+	int commid; 	/* name of the process to own this peer */
+	pid_t pid;	/* pid of the process to own this peer */
 	enum peer_type type;
 	__u32 ctrl_port;
 	__u32 snd_port;
@@ -178,8 +180,8 @@ void igi_del(struct ipcon_group_info *igi);
 void igi_free(struct ipcon_group_info *igi);
 
 struct ipcon_peer_node *ipn_alloc(__u32 ctrl_port, __u32 snd_port,
-		__u32 rcv_port, int nameid, enum peer_type type,
-		unsigned long ipn_flags,  gfp_t flag);
+		__u32 rcv_port, int nameid, int commid, pid_t pid,
+		enum peer_type type, unsigned long ipn_flags,  gfp_t flag);
 
 void ipn_free(struct ipcon_peer_node *ipn);
 unsigned int ipn_nameid(struct ipcon_peer_node *ipn);

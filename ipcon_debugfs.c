@@ -45,6 +45,16 @@ static ssize_t entry_file_read(struct file *fp, char __user *user_buffer,
 				nc_refname(ipn->nameid));
 		p += len;
 
+		/* Process Name */
+		len = sprintf(p, "%-15s%s\n", "Comm:",
+				nc_refname(ipn->commid));
+		p += len;
+
+		/* Process PID*/
+		len = sprintf(p, "%-15s%u\n", "PID:",
+				ipn->pid);
+		p += len;
+
 		/* Ctrl port */
 		len = sprintf(p, "%-15s%lu\n", "CtrlPort:",
 				(unsigned long)ipn->ctrl_port);

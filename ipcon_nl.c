@@ -948,12 +948,22 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 		return nameid;
 
 	do {
+		int commid = 0;
+
 		BUG_ON(self);
+
+		commid = nc_add(current->comm, GFP_KERNEL);
+		if (commid < 0) {
+			ret = commid;
+			break;
+		}
 
 		self = ipn_alloc(ipconmsg_srcport(skb),
 				snd_port,
 				rcv_port,
 				nameid,
+				commid,
+				current->pid,
 				peer_type,
 				ipn_flag,
 				GFP_KERNEL);
@@ -1004,6 +1014,7 @@ static int ipcon_kernel_init(void)
 	int ret = 0;
 	int kpeer_nameid = 0;
 	int kgroup_nameid = 0;
+	int commid = 0;
 
 	do {
 		ret = nc_init();
@@ -1031,7 +1042,14 @@ static int ipcon_kernel_init(void)
 			break;
 		}
 
+		commid = nc_add(current->comm, GFP_KERNEL);
+		if (commid < 0) {
+			ret = commid;
+			break;
+		}
+
 		ipn_kernel = ipn_alloc(0, 0, 0, kpeer_nameid,
+				commid, current->pid,
 				PEER_TYPE_NORMAL,
 				0,
 				GFP_KERNEL);
