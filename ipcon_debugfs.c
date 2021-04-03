@@ -56,9 +56,11 @@ static ssize_t entry_file_read(struct file *fp, char __user *user_buffer,
 		p += len;
 
 		/* Ctrl port */
-		len = sprintf(p, "%-15s%lu\n", "CtrlPort:",
+		if (ipn->ctrl_port != IPCON_INVALID_PORT) {
+			len = sprintf(p, "%-15s%lu\n", "CtrlPort:",
 				(unsigned long)ipn->ctrl_port);
-		p += len;
+			p += len;
+		}
 
 		/* Send port */
 		if (ipn->snd_port != IPCON_INVALID_PORT) {
@@ -117,7 +119,7 @@ int ipcon_debugfs_init(void)
 			&MaxNameLength);
 
 	named_peers = debugfs_create_dir("NamedPeers", diret);
-	anon_peers= debugfs_create_dir("AnonPeers", diret);
+	anon_peers = debugfs_create_dir("AnonPeers", diret);
 
 	return ret;
 }
@@ -130,7 +132,7 @@ void ipcon_debugfs_add_entry(struct ipcon_peer_node *ipn)
 	if (!ipn)
 		return;
 
-	if (ipn->type == PEER_TYPE_NORMAL)
+	if (ipn->type == PEER_TYPE_NORMAL || ipn->type == PEER_TYPE_KERNEL)
 		parent = named_peers;
 	else 
 		parent = anon_peers;

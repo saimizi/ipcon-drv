@@ -25,7 +25,7 @@ static int ipcon_init(void)
 	ret = ipcon_nl_init();
 
 	if (ret == 0) {
-		ipcon_err("init successfully.\n");
+		ipcon_info("ipcon: init successfully.\n");
 
 	} else {
 		ipcon_err("init failed (%d).\n", ret);

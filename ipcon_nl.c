@@ -15,6 +15,12 @@
 #include "ipcon_dbg.h"
 #include "../af_netlink.h"
 
+void *kernel_ipcon_reg_peer(char *name);
+int valid_kernel_ipcon_peer(void *handler);
+int kernel_ipcon_reg_group(void *handler, char *group);
+int kernel_ipcon_multicast_msg(void *handler, char *group_name,
+			char *buf, int len, int sync);
+
 #ifdef CONFIG_DEBUG_FS
 #include "ipcon_debugfs.h"
 #endif
@@ -24,8 +30,6 @@
  */
 
 #define UNUSED_GROUP_NAME	"ipconG"
-
-
 
 static struct sock *ipcon_nl_sock;
 static struct ipcon_peer_db *ipcon_db;
@@ -849,6 +853,10 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self
 		}
 
 		msg = ipconmsg_new(GFP_KERNEL);
+		if (!msg) {
+			ret = -ENOMEM;
+			break;
+		}
 
 		p = ipconmsg_put(msg, 0, 0, IPCON_MULTICAST_MSG, 0);
 		nla_put_string(msg, IPCON_ATTR_PEER_NAME,
@@ -970,6 +978,7 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 
 		if (!self) {
 			nc_id_put(nameid);
+			nc_id_put(commid);
 			ret = -ENOMEM;
 			break;
 		}
@@ -1054,6 +1063,7 @@ static int ipcon_kernel_init(void)
 				0,
 				GFP_KERNEL);
 		if (!ipn_kernel) {
+			nc_id_put(commid);
 			ret = -ENOMEM;
 			break;
 		}
@@ -1198,7 +1208,6 @@ void ipcon_nl_rcv_msg(struct sk_buff *skb)
 	mutex_unlock(&ipcon_mutex);
 }
 
-
 int ipcon_nl_init(void)
 {
 	int ret = 0;
@@ -1223,7 +1232,6 @@ int ipcon_nl_init(void)
 	if (ret)
 		ipcon_kernel_destroy();
 
-
 	return ret;
 }
 
@@ -1232,3 +1240,218 @@ void ipcon_nl_exit(void)
 	netlink_unregister_notifier(&ipcon_netlink_notifier);
 	ipcon_kernel_destroy();
 }
+
+
+void *kernel_ipcon_reg_peer(char *name)
+{
+	int ret = 1;
+	int nameid = 0;
+	int commid = 0;
+	struct ipcon_peer_node *ipn = NULL;
+
+	do {
+		if (!ipcon_db)
+			break;
+
+		if (!valid_name(name))
+			break;
+
+		nameid = nc_add(name, GFP_KERNEL);
+		if (nameid < 0)
+			break;
+
+		commid = nc_add(current->comm, GFP_KERNEL);
+		if (commid < 0)
+			break;
+
+		ipn = ipn_alloc(IPCON_INVALID_PORT,
+			IPCON_INVALID_PORT,
+			IPCON_INVALID_PORT,
+			nameid,
+			commid,
+			current->pid,
+			PEER_TYPE_KERNEL,
+			0,
+			GFP_KERNEL);
+
+		ret = ipd_insert(ipcon_db, ipn);
+		if (ret < 0)
+			break;
+
+		if (ipn) {
+			struct ipcon_work *iw = NULL;
+			struct ipcon_kevent *ik;
+
+			iw = iw_alloc(ipcon_kevent_worker,
+				sizeof(*ik), GFP_ATOMIC);
+			if (iw) {
+				ik = iw->data;
+
+				ik->type = IPCON_EVENT_PEER_ADD;
+				nc_getname(ipn->nameid, ik->peer.name);
+				queue_work(igi_kernel->mc_wq, &iw->work);
+			}
+		}
+
+		ret = 0;
+	} while (0);
+
+	if (nameid > 0)
+		nc_id_put(nameid);
+
+	if (commid > 0)
+		nc_id_put(commid);
+
+	if (ret && ipn) {
+		ipn_free(ipn);
+		ipn = NULL;
+	}
+
+	return (void *)ipn;
+}
+EXPORT_SYMBOL(kernel_ipcon_reg_peer);
+
+int valid_kernel_ipcon_peer(void *handler)
+{
+	int ret = 0;
+
+	do {
+		struct ipcon_peer_node *ipn = handler;
+		struct ipcon_peer_node *t;
+
+		if (!ipn)
+			break;
+
+		if (ipn->type != PEER_TYPE_KERNEL)
+			break;
+
+		t = ipd_lookup_byname(ipcon_db, ipn->nameid);
+		if (t != ipn)
+			break;
+
+		ret = 1;
+	} while (0);
+
+	return ret;
+}
+EXPORT_SYMBOL(valid_kernel_ipcon_peer);
+
+int kernel_ipcon_reg_group(void *handler, char *group)
+{
+	int ret = 1;
+	int group_nameid = 0;
+	int groupid = 0;
+
+	do {
+		struct ipcon_peer_node *ipn = handler;
+
+		if (!ipcon_db)
+			break;
+
+		if (!valid_name(group))
+			break;
+
+		if (!valid_kernel_ipcon_peer(handler))
+			break;
+
+
+		group_nameid = nc_add(group, GFP_KERNEL);
+		if (group_nameid < 0)
+			break;
+
+		groupid = reg_new_group(ipcon_db);
+		if (groupid > IPCON_MAX_GROUP)
+			break;
+
+		ret = ipn_reg_group(ipn, group_nameid, groupid);
+
+	} while (0);
+
+	if (group_nameid > 0)
+		nc_id_put(group_nameid);
+
+	return ret;
+}
+EXPORT_SYMBOL(kernel_ipcon_reg_group);
+
+int kernel_ipcon_multicast_msg(void *handler, char *group_name,
+			char *buf, int len, int sync)
+{
+	int ret = 0;
+	int group_nameid = 0;
+
+	do {
+		struct ipcon_peer_node *ipn = handler;
+		struct ipcon_group_info *igi = NULL;
+		struct sk_buff	*msg = NULL;
+		void *p = NULL;
+
+		if (!valid_kernel_ipcon_peer(handler)) {
+			ret = -EINVAL;
+			break;
+		}
+
+		if (!valid_name(group_name)) {
+			ret = -EINVAL;
+			break;
+		}
+
+		if (!buf || len <= 0) {
+			ret = -EINVAL;
+			break;
+		}
+
+		group_nameid = nc_getid(group_name);
+		if (group_nameid < 0) {
+			ret = -EINVAL;
+			break;
+		}
+
+		igi = ipn_lookup_byname(ipn, group_nameid);
+		if (!igi) {
+			ret = -ESRCH;
+			break;
+		}
+
+		msg = ipconmsg_new(GFP_KERNEL);
+		if (!msg) {
+			ret = -ENOMEM;
+			break;
+		}
+
+		p = ipconmsg_put(msg, 0, 0, IPCON_MULTICAST_MSG, 0);
+		nla_put_string(msg, IPCON_ATTR_PEER_NAME,
+				nc_refname(ipn_nameid(ipn)));
+
+		nla_put_string(msg, IPCON_ATTR_GROUP_NAME,
+				nc_refname(group_nameid));
+		nla_put(msg, IPCON_ATTR_DATA, len, buf);
+		ipconmsg_end(msg, p);
+
+		if (sync) {
+			ret = ipcon_multicast(msg, 0, igi->group, GFP_KERNEL);
+		} else {
+			struct ipcon_multicast_worker_data *imwd;
+			struct ipcon_work *iw = NULL;
+
+			iw = iw_alloc(ipcon_multicast_worker,
+					sizeof(*imwd), GFP_ATOMIC);
+			if (!iw) {
+				ret = -ENOMEM;
+				break;
+			}
+
+			imwd = iw->data;
+			imwd->igi = igi;
+			imwd->sender_port = 0;
+			imwd->skb = msg;
+			queue_work(igi->mc_wq, &iw->work);
+		}
+	} while (0);
+
+	if (group_nameid > 0)
+		nc_id_put(group_nameid);
+
+	return ret;
+}
+EXPORT_SYMBOL(kernel_ipcon_multicast_msg);

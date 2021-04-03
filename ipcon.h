@@ -16,6 +16,7 @@
 enum peer_type {
 	PEER_TYPE_ANON,
 	PEER_TYPE_NORMAL,
+	PEER_TYPE_KERNEL,
 	PEER_TYPE_MAX,
 };
 
