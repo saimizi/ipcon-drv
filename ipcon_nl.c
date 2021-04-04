@@ -109,6 +109,8 @@ static int ipcon_kevent_filter(struct sock *dsk, struct sk_buff *skb, void *data
 	if (ipn  == ipn_kernel)
 		return 1;
 
+	/* no real socket for PEER_TYPE_KERNEL exist */
+	BUG_ON(ipn->type == PEER_TYPE_KERNEL);
 
 	/* data is only present for ipcon_kevent when sending ipcon kevent */
 	do {
@@ -709,6 +711,7 @@ int ipcon_multicast_filtered(struct sk_buff *skb, __u32 exclusive_port,
                 if (!netlink_has_listeners(ipcon_nl_sock, group)) {
                         ipcon_dbg("%s: No listener in group %d\n",
                                 __func__, group);
+			consume_skb(skb);
                         break;
                 }
 
@@ -1212,25 +1215,33 @@ int ipcon_nl_init(void)
 {
 	int ret = 0;
 
-	struct netlink_kernel_cfg cfg = {
-		.input  = ipcon_nl_rcv_msg,
-		.groups	= IPCON_MAX_GROUP,
-		.flags	= NL_CFG_F_NONROOT_RECV,
-	};
+	do {
+		struct netlink_kernel_cfg cfg = {
+			.input  = ipcon_nl_rcv_msg,
+			.groups	= IPCON_MAX_GROUP,
+			.flags	= NL_CFG_F_NONROOT_RECV,
+		};
 
-	ipcon_nl_sock = netlink_kernel_create(&init_net, NETLINK_IPCON, &cfg);
-	if (!ipcon_nl_sock) {
-		ipcon_err("Failed to create netlink socket.\n");
-		ret = -ENOMEM;
-	}
+		ipcon_nl_sock = netlink_kernel_create(&init_net, NETLINK_IPCON, &cfg);
+		if (!ipcon_nl_sock) {
+			ipcon_err("Failed to create netlink socket.\n");
+			ret = -ENOMEM;
+			break;
+		}
 
-	ret = ipcon_kernel_init();
-	if (ret < 0)
-		return ret;
+		ret = ipcon_kernel_init();
+		if (ret < 0) {
+			ipcon_err("Failed to init ipcon kernel module.\n");
+			break;
+		}
 
-	ret = netlink_register_notifier(&ipcon_netlink_notifier);
-	if (ret)
-		ipcon_kernel_destroy();
+		ret = netlink_register_notifier(&ipcon_netlink_notifier);
+		if (ret) {
+			ipcon_err("Failed to register ipcon netlink notifier.\n");
+			ipcon_kernel_destroy();
+			break;
+		}
+	} while (0);
 
 	return ret;
 }

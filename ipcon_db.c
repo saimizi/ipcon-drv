@@ -275,6 +275,7 @@ void ipn_free(struct ipcon_peer_node *ipn)
 			hash_del(&fnd->node);
 			nc_id_put(fnd->peer_nameid);
 			nc_id_put(fnd->group_nameid);
+			kfree(fnd);
 		}
 
 	BUG_ON(!hash_empty(ipn->ipn_name_ht));
