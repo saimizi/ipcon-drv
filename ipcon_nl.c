@@ -1347,6 +1347,76 @@ int valid_kernel_ipcon_peer(void *handler)
 }
 EXPORT_SYMBOL(valid_kernel_ipcon_peer);
 
+int kernel_ipcon_unreg_peer(void *handler)
+{
+	int ret = 1;
+
+	do {
+		struct ipcon_peer_node *ipn = handler;
+		struct ipcon_group_info *igi = NULL;
+		struct ipcon_work *iw_mc = NULL;
+		struct ipcon_kevent *ik = NULL;
+		int bkt = 0;
+		struct hlist_node *tmp;
+
+		if (!ipcon_db)
+			break;
+
+		if (!valid_kernel_ipcon_peer(handler))
+			break;
+
+		ipn_del(ipn);
+
+		module_put(THIS_MODULE);
+
+		if (!hash_empty(ipn->ipn_group_ht)) {
+			hash_for_each_safe(ipn->ipn_group_ht, bkt, tmp,
+					igi, igi_hgroup) {
+
+				igi_del(igi);
+				flush_workqueue(igi->mc_wq);
+
+				/* clear users */
+				ipcon_clear_multicast_user(igi->group);
+
+				ipcon_dbg("Group %s.%s@%d removed.\n",
+					nc_refname(ipn->nameid),
+					nc_refname(igi->nameid),
+					igi->group);
+
+				iw_mc = iw_alloc(ipcon_kevent_worker,
+						sizeof(*ik), GFP_KERNEL);
+				if (iw_mc) {
+					ik = iw_mc->data;
+					ik->type = IPCON_EVENT_GRP_REMOVE;
+					nc_getname(igi->nameid, ik->group.name);
+					nc_getname(ipn->nameid,
+							ik->group.peer_name);
+					queue_work(igi_kernel->mc_wq,
+							&iw_mc->work);
+				}
+
+				igi_free(igi);
+				unreg_group(ipcon_db, igi->group);
+			}
+		}
+
+
+		iw_mc = iw_alloc(ipcon_kevent_worker, sizeof(*ik), GFP_KERNEL);
+		if (iw_mc) {
+			ik = iw_mc->data;
+			ik->type = IPCON_EVENT_PEER_REMOVE;
+			nc_getname(ipn->nameid, ik->peer.name);
+			queue_work(igi_kernel->mc_wq, &iw_mc->work);
+		}
+
+		ipn_free(ipn);
+	} while (0);
+
+	return ret;
+}
+EXPORT_SYMBOL(kernel_ipcon_unreg_peer);
+
 int kernel_ipcon_reg_group(void *handler, char *group)
 {
 	int ret = 1;
@@ -1384,6 +1454,72 @@ int kernel_ipcon_reg_group(void *handler, char *group)
 	return ret;
 }
 EXPORT_SYMBOL(kernel_ipcon_reg_group);
+
+int kernel_ipcon_unreg_group(void *handler, char *group)
+{
+	int ret = 1;
+	int group_nameid = 0;
+
+	do {
+		struct ipcon_peer_node *ipn = handler;
+		struct ipcon_group_info *igi = NULL;
+		struct ipcon_work *iw = NULL;
+		struct ipcon_kevent *ik;
+
+		if (!ipcon_db)
+			break;
+
+		if (!valid_name(group))
+			break;
+
+		if (!valid_kernel_ipcon_peer(handler))
+			break;
+
+		group_nameid = nc_add(group, GFP_KERNEL);
+		if (group_nameid < 0)
+			break;
+
+		igi = ipn_lookup_byname(ipn, group_nameid);
+		if (igi)
+			break;
+
+		igi_del(igi);
+
+		flush_workqueue(igi->mc_wq);
+
+		/* clear users */
+		ipcon_clear_multicast_user(igi->group);
+
+		/* send group remove kevent */
+		iw = iw_alloc(ipcon_kevent_worker, sizeof(*ik), GFP_KERNEL);
+		if (iw) {
+			ik = iw->data;
+
+			ik->type = IPCON_EVENT_GRP_REMOVE;
+			nc_getname(igi->nameid, ik->group.name);
+			nc_getname(ipn->nameid, ik->group.peer_name);
+
+			ipcon_dbg("Group %s.%s@%d removed.\n",
+				ik->group.peer_name,
+				ik->group.name,
+				igi->group);
+
+			queue_work(igi_kernel->mc_wq, &iw->work);
+		}
+
+		/* mark group id be reusable. */
+		unreg_group(ipcon_db, igi->group);
+
+		/* free igi */
+		igi_free(igi);
+	} while (0);
+
+	if (group_nameid > 0)
+		nc_id_put(group_nameid);
+
+	return ret;
+}
+EXPORT_SYMBOL(kernel_ipcon_unreg_group);
 
 int kernel_ipcon_multicast_msg(void *handler, char *group_name,
 			char *buf, int len, int sync)
