@@ -16,10 +16,11 @@
 struct ipcon_group_info {
 	struct hlist_node igi_hname;
 	struct hlist_node igi_hgroup;
-	unsigned int group;
+	int group;
 	int nameid;
-	atomic_t msg_sending_cnt;
-	wait_queue_head_t wq;
+	atomic_t refcnt;
+	struct workqueue_struct *mc_wq;
+	struct ipcon_peer_node *ipn;
 };
 
 struct filter_node {
@@ -29,18 +30,29 @@ struct filter_node {
 	int group_nameid;
 };
 
+#define IPCON_INVALID_PORT	0xFFFFFFFF
+#define IPN_FLG_DISABLE_KEVENT_FILTER		(1 << 0)
 struct ipcon_peer_node {
 	rwlock_t lock;
 	int nameid;
-	__u32 port;
-	__u32 ctrl_port;
+	int commid; 	/* name of the process to own this peer */
+	pid_t pid;	/* pid of the process to own this peer */
 	enum peer_type type;
+	__u32 ctrl_port;
+	__u32 snd_port;
+	__u32 rcv_port;
 	DECLARE_HASHTABLE(ipn_name_ht, IPN_HASH_BIT);
 	DECLARE_HASHTABLE(ipn_group_ht, IPN_HASH_BIT);
 	DECLARE_HASHTABLE(filter_ht, IPN_HASH_BIT);
 	struct hlist_node ipn_hname;
-	struct hlist_node ipn_hport;
+	struct hlist_node ipn_hsport;
 	struct hlist_node ipn_hcport;
+	struct hlist_node ipn_hrport;
+	struct ipcon_peer_db *ipd;
+	unsigned long flags;
+#ifdef CONFIG_DEBUG_FS
+	struct dentry *d;
+#endif
 };
 
 #define IPD_HASH_BIT	10
@@ -48,11 +60,11 @@ struct ipcon_peer_node {
 struct ipcon_peer_db {
 	rwlock_t lock;
 	DECLARE_HASHTABLE(ipd_name_ht, IPD_HASH_BIT);
-	DECLARE_HASHTABLE(ipd_port_ht, IPD_HASH_BIT);
+	DECLARE_HASHTABLE(ipd_sport_ht, IPD_HASH_BIT);
 	DECLARE_HASHTABLE(ipd_cport_ht, IPD_HASH_BIT);
+	DECLARE_HASHTABLE(ipd_rport_ht, IPD_HASH_BIT);
 	rwlock_t group_bitmap_lock;
 	unsigned long group_bitmap[BITS_TO_LONGS(IPCON_MAX_GROUP)];
-	struct workqueue_struct *mc_wq;
 	struct workqueue_struct *notify_wq;
 };
 
@@ -123,7 +135,7 @@ static inline int group_inuse(struct ipcon_peer_db *db, int group)
 static inline void reg_group(struct ipcon_peer_db *db, int group)
 {
 	write_lock(&db->group_bitmap_lock);
-	set_bit(group, db->group_bitmap);
+	set_bit(group - 1, db->group_bitmap);
 	write_unlock(&db->group_bitmap_lock);
 }
 
@@ -138,23 +150,41 @@ static inline int reg_new_group(struct ipcon_peer_db *db)
 		set_bit(group, db->group_bitmap);
 	write_unlock(&db->group_bitmap_lock);
 
-	return group;
+	return group + 1;
 }
 
 static inline void unreg_group(struct ipcon_peer_db *db, int group)
 {
 	write_lock(&db->group_bitmap_lock);
-	clear_bit(group, db->group_bitmap);
+	clear_bit(group - 1, db->group_bitmap);
 	write_unlock(&db->group_bitmap_lock);
+}
+
+static inline __u32 ipn_sndport(struct ipcon_peer_node *ipn)
+{
+	return ipn->snd_port;
+}
+
+static inline __u32 ipn_ctrlport(struct ipcon_peer_node *ipn)
+{
+	return ipn->ctrl_port;
+}
+
+static inline __u32 ipn_rcvport(struct ipcon_peer_node *ipn)
+{
+	return ipn->rcv_port;
 }
 
 struct ipcon_group_info *igi_alloc(int nameid, unsigned int group, gfp_t flag);
 void igi_del(struct ipcon_group_info *igi);
 void igi_free(struct ipcon_group_info *igi);
 
-struct ipcon_peer_node *ipn_alloc(__u32 port, __u32 ctrl_port,
-				int nameid, enum peer_type type, gfp_t flag);
+struct ipcon_peer_node *ipn_alloc(__u32 ctrl_port, __u32 snd_port,
+		__u32 rcv_port, int nameid, int commid, pid_t pid,
+		enum peer_type type, unsigned long ipn_flags,  gfp_t flag);
+
 void ipn_free(struct ipcon_peer_node *ipn);
+unsigned int ipn_nameid(struct ipcon_peer_node *ipn);
 struct ipcon_group_info *ipn_lookup_byname(struct ipcon_peer_node *ipn,
 					int nameid);
 struct ipcon_group_info *ipn_lookup_bygroup(struct ipcon_peer_node *ipn,
@@ -166,10 +196,13 @@ void ipn_del(struct ipcon_peer_node *ipn);
 struct ipcon_peer_db *ipd_alloc(gfp_t flag);
 struct ipcon_peer_node *ipd_lookup_byname(struct ipcon_peer_db *ipd,
 					int nameid);
-struct ipcon_peer_node *ipd_lookup_byport(struct ipcon_peer_db *ipd,
+struct ipcon_peer_node *ipd_lookup_bysport(struct ipcon_peer_db *ipd,
 					u32 port);
 
 struct ipcon_peer_node *ipd_lookup_bycport(struct ipcon_peer_db *ipd,
+					u32 port);
+
+struct ipcon_peer_node *ipd_lookup_byrport(struct ipcon_peer_db *ipd,
 					u32 port);
 
 int ipd_insert(struct ipcon_peer_db *ipd, struct ipcon_peer_node *ipn);

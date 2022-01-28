@@ -8,25 +8,41 @@
 #include <net/sock.h>
 #include <net/netlink.h>
 #include "ipcon.h"
-#include "ipcon_genl.h"
+#include "ipcon_nl.h"
 #include "ipcon_dbg.h"
+
+#ifdef CONFIG_DEBUG_FS
+#include "ipcon_debugfs.h"
+#endif
 
 static int ipcon_init(void)
 {
 	int ret = 0;
 
-	ret = ipcon_genl_init();
-	if (ret)
+#ifdef CONFIG_DEBUG_FS
+	ipcon_debugfs_init();
+#endif
+	ret = ipcon_nl_init();
+
+	if (ret == 0) {
+		ipcon_info("ipcon: init successfully.\n");
+
+	} else {
 		ipcon_err("init failed (%d).\n", ret);
-	else
-		ipcon_err("init successfully.\n");
+#ifdef CONFIG_DEBUG_FS
+		ipcon_debugfs_exit();
+#endif
+	}
 
 	return ret;
 }
 
 static void ipcon_exit(void)
 {
-	ipcon_genl_exit();
+#ifdef CONFIG_DEBUG_FS
+	ipcon_debugfs_exit();
+#endif
+	ipcon_nl_exit();
 	ipcon_info("exit.\n");
 }
 

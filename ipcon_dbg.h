@@ -5,18 +5,11 @@
 #ifndef __IPCON_DBG_H__
 #define __IPCON_DBG_H__
 
-#define ipcon_err(fmt, ...) \
-	pr_err("[ipcon] " fmt, ##__VA_ARGS__)
-
-#define ipcon_warn(fmt, ...) \
-	pr_warn("[ipcon] " fmt, ##__VA_ARGS__)
-
-#define ipcon_info(fmt, ...) \
-	pr_info("[ipcon] " fmt, ##__VA_ARGS__)
-
+#define ipcon_err	pr_err
+#define ipcon_warn	pr_warn
+#define ipcon_info	pr_info
 #define ipcon_dbg(fmt, ...) \
 	pr_debug("[ipcon] %s-%d " fmt, __func__, __LINE__, ##__VA_ARGS__)
-
 
 #ifdef DEBUG_LOCK
 #define ipcon_dbg_lock(fmt, ...) \

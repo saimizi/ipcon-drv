@@ -1,2 +1,2 @@
-obj-${CONFIG_IPCON} += main.o ipcon_genl.o ipcon_db.o name_cache.o
-CFLAGS_ipcon_genl.o += -Inet/netlink
+obj-${CONFIG_IPCON} += main.o ipcon_nl.o ipcon_msg.o ipcon_db.o name_cache.o
+obj-${CONFIG_DEBUG_FS} += ipcon_debugfs.o

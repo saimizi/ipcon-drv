@@ -1,4 +1,6 @@
 #include <linux/hashtable.h>
+#include <linux/slab.h>
+#include <linux/idr.h>
 #include "ipcon.h"
 #include "ipcon_dbg.h"
 #include "name_cache.h"
@@ -144,10 +146,10 @@ static inline int __nc_getid(struct nc_head *nch, char *name)
 			str2hash(name))
 		if (!strcmp(nce->name, name)) {
 			ret = nce->id;
+			atomic_inc(&nce->refcnt);
 			break;
 		}
 	read_unlock(&nch->lock);
-
 	return ret;
 }
 
@@ -201,7 +203,7 @@ static inline void __nc_name_put(struct nc_head *nch, char *name)
 	write_lock(&nch->lock);
 }
 
-static inline void __nc_id_get(struct nc_head *nch, int id)
+static inline int __nc_id_get(struct nc_head *nch, int id)
 {
 	struct nc_entry *nce = NULL;
 
@@ -210,6 +212,8 @@ static inline void __nc_id_get(struct nc_head *nch, int id)
 	if (nce)
 		atomic_inc(&nce->refcnt);
 	read_unlock(&nch->lock);
+
+	return id;
 }
 
 
@@ -227,7 +231,7 @@ static inline void __nc_id_put(struct nc_head *nch, int id)
 	write_unlock(&nch->lock);
 }
 
-void nc_id_get(int id)
+int nc_id_get(int id)
 {
 	return __nc_id_get(ipcon_nc, id);
 }
