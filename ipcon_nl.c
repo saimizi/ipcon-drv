@@ -391,7 +391,7 @@ static int ipcon_peer_reslove(struct sk_buff *skb, struct ipcon_peer_node *self)
 			break;
 		}
 
-		nla_strlcpy(name, tb[IPCON_ATTR_PEER_NAME], IPCON_MAX_NAME_LEN);
+		nla_strscpy(name, tb[IPCON_ATTR_PEER_NAME], IPCON_MAX_NAME_LEN);
 		if (!valid_name(name)) {
 			ret = -EINVAL;
 			break;
@@ -484,7 +484,7 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 	if (!tb[IPCON_ATTR_GROUP_NAME])
 		return -EINVAL;
 
-	nla_strlcpy(name, tb[IPCON_ATTR_GROUP_NAME], IPCON_MAX_NAME_LEN);
+	nla_strscpy(name, tb[IPCON_ATTR_GROUP_NAME], IPCON_MAX_NAME_LEN);
 	nameid = nc_add(name, GFP_KERNEL);
 	if (nameid < 0)
 		return nameid;
@@ -520,7 +520,7 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct ipcon_peer_node *self)
 	if (!tb[IPCON_ATTR_GROUP_NAME])
 		return -EINVAL;
 
-	nla_strlcpy(name, tb[IPCON_ATTR_GROUP_NAME], IPCON_MAX_NAME_LEN);
+	nla_strscpy(name, tb[IPCON_ATTR_GROUP_NAME], IPCON_MAX_NAME_LEN);
 	if (!valid_name(name))
 		return -EINVAL;
 
@@ -601,8 +601,8 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct ipcon_peer_node *self)
 	if (!tb[IPCON_ATTR_GROUP_NAME] || !tb[IPCON_ATTR_PEER_NAME])
 		return -EINVAL;
 
-	nla_strlcpy(peer_name, tb[IPCON_ATTR_PEER_NAME], IPCON_MAX_NAME_LEN);
-	nla_strlcpy(group_name, tb[IPCON_ATTR_GROUP_NAME], IPCON_MAX_NAME_LEN);
+	nla_strscpy(peer_name, tb[IPCON_ATTR_PEER_NAME], IPCON_MAX_NAME_LEN);
+	nla_strscpy(group_name, tb[IPCON_ATTR_GROUP_NAME], IPCON_MAX_NAME_LEN);
 	if (!valid_name(peer_name) || !valid_name(group_name))
 		return -EINVAL;
 
@@ -754,7 +754,7 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self)
 	if (!tb[IPCON_ATTR_PEER_NAME] || !tb[IPCON_ATTR_DATA])
 		return -EINVAL;
 
-	nla_strlcpy(peer_name, tb[IPCON_ATTR_PEER_NAME], IPCON_MAX_NAME_LEN);
+	nla_strscpy(peer_name, tb[IPCON_ATTR_PEER_NAME], IPCON_MAX_NAME_LEN);
 	if (!valid_name(peer_name))
 		return -EINVAL;
 
@@ -834,7 +834,7 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self
 		 IPCON_FLG_MULTICAST_SYNC))
 		sync = 1;
 
-	nla_strlcpy(group_name, tb[IPCON_ATTR_GROUP_NAME], IPCON_MAX_NAME_LEN);
+	nla_strscpy(group_name, tb[IPCON_ATTR_GROUP_NAME], IPCON_MAX_NAME_LEN);
 	if (!valid_name(group_name))
 		return -EINVAL;
 
@@ -951,7 +951,7 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 			snd_port = nla_get_u32(tb[IPCON_ATTR_SPORT]);
 	}
 
-	nla_strlcpy(name, tb[IPCON_ATTR_PEER_NAME], IPCON_MAX_NAME_LEN);
+	nla_strscpy(name, tb[IPCON_ATTR_PEER_NAME], IPCON_MAX_NAME_LEN);
 
 
 	nameid = nc_add(name, GFP_KERNEL);
