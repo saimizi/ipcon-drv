@@ -1219,7 +1219,7 @@ int ipcon_nl_init(void)
 		struct netlink_kernel_cfg cfg = {
 			.input  = ipcon_nl_rcv_msg,
 			.groups	= IPCON_MAX_GROUP,
-			.flags	= NL_CFG_F_NONROOT_RECV,
+			.flags	= NL_CFG_F_NONROOT_RECV | NL_CFG_F_NONROOT_SEND	,
 		};
 
 		ipcon_nl_sock = netlink_kernel_create(&init_net, NETLINK_IPCON, &cfg);
