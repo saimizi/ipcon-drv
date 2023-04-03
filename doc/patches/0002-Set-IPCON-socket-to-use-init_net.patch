@@ -1,0 +1,41 @@
+From d5997daf36a4e6f5b9f9a766ee493261dc51a6ef Mon Sep 17 00:00:00 2001
+From: Seimizu Joukan <joukan.seimizu@gmail.com>
+Date: Sun, 26 Mar 2023 13:52:23 +0900
+Subject: [PATCH 2/2] Set IPCON socket to use init_net.
+
+IPCON protocol exptects to transfer user message globally across network
+space so that user applications inside a container can communicate each
+other.
+---
+ net/netlink/af_netlink.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/net/netlink/af_netlink.c b/net/netlink/af_netlink.c
+index 83ca93b32f5f..a5b6ade7ce0f 100644
+--- a/net/netlink/af_netlink.c
++++ b/net/netlink/af_netlink.c
+@@ -633,6 +633,9 @@ static struct proto netlink_proto = {
+ 	.obj_size = sizeof(struct netlink_sock),
+ };
+ 
++#ifndef NETLINK_IPCON
++#define NETLINK_IPCON	29
++#endif
+ static int __netlink_create(struct net *net, struct socket *sock,
+ 			    struct mutex *cb_mutex, int protocol,
+ 			    int kern)
+@@ -641,6 +644,11 @@ static int __netlink_create(struct net *net, struct socket *sock,
+ 	struct netlink_sock *nlk;
+ 
+ 	sock->ops = &netlink_ops;
++	/*
++	 * IPCON Protocol is global and expected to cross net namespace.
++	 */
++	if (protocol == NETLINK_IPCON)
++		net = &init_net;
+ 
+ 	sk = sk_alloc(net, PF_NETLINK, GFP_KERNEL, &netlink_proto, kern);
+ 	if (!sk)
+-- 
+2.25.1
+
