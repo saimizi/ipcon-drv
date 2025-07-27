@@ -1,139 +1,84 @@
-# IPC Over Netlink (IPCON) driver I/F
+# IPCON Driver Interface
 
-IPCON (IPC Over Netlink) is an IPC for user applications based on the Netlink
-protocol. It is implemented as a sub protocol family of the generic netlink
-subsytem. This document describes the driver I/F of IPCON.
+IPCON (IPC Over Netlink) is a kernel module that provides an Inter-Process Communication (IPC) mechanism for user-space applications. It is implemented as a generic Netlink protocol family. This document describes the driver's application programming interface (API).
 
-## Outline of IPCON
+## IPCON Overview
 
-This section describes the outline of IPCON driver. The following figure shows
-the software stack of IPCON:
+The IPCON driver acts as an intermediary for user processes, enabling them to communicate with each other. The following diagram illustrates the software stack of IPCON:
 
- 
-![ipcon_stack](ipcon_stack.png)
+![IPCON Stack](doc/ipcon_stack.png)
 
+### Peers
 
-As described in software stack, IPCON driver which is a generic netlink driver
-intermidated between the user processes that want to communicate with each other.
+A **Peer** is an entity used to transfer messages. Each peer has the following attributes:
 
-### Peer
-The entity used to transfer messages is called a ***Peer***. A peer must have
-following attributes:
+1.  **Name**: A unique string of up to 63 characters used to identify the peer.
+2.  **Control Port**: A Netlink socket for sending messages and communicating with the IPCON driver.
+3.  **Communication Port**: A Netlink socket for receiving messages.
+4.  **Peer Type**: The type of the peer, which can be one of the following:
+    *   **ANON**: A peer for sending and receiving messages to and from other peers. `ANON` peers do not have groups and cannot send multicast messages. The creation and exit of `ANON` peers are not broadcast to other peers.
+    *   **PUBLISHER**: A peer for sending group messages. A `PUBLISHER` can have one or more multicast groups that other peers can subscribe to. Messages sent to a group are multicasted to all subscribers. `PUBLISHER` peers cannot receive messages.
+    *   **SERVICE**: Similar to an `ANON` peer, but the creation and exit of a `SERVICE` peer are broadcast to other peers through IPCON kernel events.
+    *   **SERVICE_PUBLISHER**: A peer that can act as both a `PUBLISHER` and a `SERVICE`.
 
-1. *name*  
-   A string to identify the peer. *name* must be unique in the system with a
-   maxmum length of 64 byte.
+### Message Transfer
 
-2. *control port*  
-   A netlink socket used to send messages and communicate to IPCON driver.
+Messages between peers are always intermediated by the IPCON driver:
 
-3. *communicate port*  
-   A netlink socket used to receive messages.
+*   Peers identify each other by name, not by Netlink port. The port number of a peer is never exposed to other peers by IPCON.
 
-4. *peer type*  
-   The type of the peer, which is defined as "enum peer_type". the type of a
-   peer must be one of the following:  
-   * *ANON*  
-     A peer used to send/receive message to/from another peer. An *ANON* peer
-     does not have a group and can not send multicast messages. Also the
-     creation and exit of an *ANON* peer will not be informed to the user
-     proceses.
+*   When a peer sends a message to another peer:
+    1.  The sender passes the message and the target peer's name to the IPCON driver through the control port.
+    2.  The IPCON driver validates the message and the sender/target peers.
+    3.  If valid, the IPCON driver passes the message to the target peer's communication port, along with the sender's name.
 
-   * *PUBLISHER*  
-     A peer used to send group messages. A *PUBLISHER* may have one or more
-     multicast groups which can be suscribed by other peers. The messages sent
-     to the group will be multicasted to all the suscribers. A *PUBLISHER* can
-     not receive messages from other peers.
+*   When a `PUBLISHER` or `SERVICE_PUBLISHER` sends a group message:
+    1.  The sender passes the message and the group name to the IPCON driver through the control port.
+    2.  The IPCON driver validates the message, sender, and group name.
+    3.  If valid, the IPCON driver multicasts the message to all subscribers' communication ports, along with the sender's name and the group name.
 
-   * *SERVICE*  
-     Same to *ANON* peer, but the creation and exit of a *SERVICE* peer will be
-     informed to user processes though the IPCON kernel event.
+**Note:** Messages are transferred using the Netlink protocol, which is not reliable. Messages may be dropped if a receiving peer's buffer overflows.
 
-   * *SERVICE_PUBLISHER*  
-     A peer can act both as a "PUBLISHER" and a "SERVICE".
+### IPCON Kernel Events
 
-### Message transfer
+The IPCON driver manages all peers in the system and uses a special `ipcon_kevent` message group to notify subscribers about the creation and exit of peers (excluding `ANON` peers).
 
-In IPCON, messages from a peer to another peer are ALWAYS intermediated by the
-IPCON driver. That means:
+The `ipcon_kevent` message is defined as follows:
 
-* Peers identify each other by using *name* instead of the netlink port.  
-  The port number of a peer will never be exposed to other peers by IPCON.
-
-* When a peer wants to send a message to another peer,  
-  1. Sender peer passes the message and the name of the target peer to IPCON
-     driver though the *control port*;
-  2. IPCON driver checks the message and sender/target peer;
-  3. If both the sender/target peer and  the message are valid, IPCON driver
-     passes the message to the *communicate port* of the target peer together
-     with the name of the sender peer;
-
-* A "PUBLISHER" or "SERVICE_PUBLISHER" peer may create one or more groups. When
-  it wants to send a group message,
-  1. It passes the message and the group name to IPCON driver though *control
-     port*;
-  2. IPCON driver checks the message, sender peer and group name;
-  3. If the check succeed, it multicasts the message to all suscribers's
-     communicate port together the name of the sender peer and the group.
-
-Since messages are transferred by using netlink protocol which is not a reliable
-one, messages may be dropped because of the buffer flow of the receving peer.
-
-
-### IPCON Kevent
-
-IPCON driver manages all peers in the system that is using IPCON and it
-maintains a speicial "*ipcon_kevent*" message group to inform the suscribers the
-creation and exit of a peer (except an *ANON* peer). The message to this
-*ipcon_kevent* group is defined as following:
-
-```
+```c
 enum ipcon_kevent_type {
-	IPCON_EVENT_PEER_ADD,
-	IPCON_EVENT_PEER_REMOVE,
-	IPCON_EVENT_GRP_ADD,
-	IPCON_EVENT_GRP_REMOVE,
+    IPCON_EVENT_PEER_ADD,
+    IPCON_EVENT_PEER_REMOVE,
+    IPCON_EVENT_GRP_ADD,
+    IPCON_EVENT_GRP_REMOVE,
 };
 
 struct ipcon_kevent {
-	enum ipcon_kevent_type type;
-	union {
-		struct {
-			char name[IPCON_MAX_NAME_LEN];
-			char peer_name[IPCON_MAX_NAME_LEN];
-		} group;
-		struct {
-			char name[IPCON_MAX_NAME_LEN];
-		} peer;
-	};
+    enum ipcon_kevent_type type;
+    union {
+        struct {
+            char name[IPCON_MAX_NAME_LEN];
+            char peer_name[IPCON_MAX_NAME_LEN];
+        } group;
+        struct {
+            char name[IPCON_MAX_NAME_LEN];
+        } peer;
+    };
 };
 ```
 
-The following summarize the message speicifcation.
+The following describes the message specifications:
 
-* IPCON_EVENT_PEER_ADD   
-  A new peer is added.  
-  * peer.name  
-    Name of the peer newly added. 
+*   **IPCON_EVENT_PEER_ADD**: A new peer has been added.
+    *   `peer.name`: The name of the newly added peer.
 
+*   **IPCON_EVENT_PEER_REMOVE**: A peer has been removed.
+    *   `peer.name`: The name of the removed peer.
 
-* IPCON_EVENT_PEER_REMOVE  
-  A peer is removed.  
-  * peer.name  
-    Name of the peer removed.
+*   **IPCON_EVENT_GRP_ADD**: A new group has been added.
+    *   `group.name`: The name of the newly added group.
+    *   `group.peer_name`: The name of the peer to which the group belongs.
 
-
-* IPCON_EVENT_GRP_ADD    
-  A new group is added.
-  * group.name  
-    Name of the goroup newly added.
-  * group.peer_name
-    Name of the peer to which the group belongs.
-
-
-* IPCON_EVENT_GRP_REMOVE  
-  A group is removed.
-  * group.name  
-    Name of the goroup removed.
-  * group.peer_name
-    Name of the peer to which the removed group belongs.
+*   **IPCON_EVENT_GRP_REMOVE**: A group has been removed.
+    *   `group.name`: The name of the removed group.
+    *   `group.peer_name`: The name of the peer to which the removed group belongs.
