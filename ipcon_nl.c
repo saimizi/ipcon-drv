@@ -503,6 +503,41 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 	return ret;
 }
 
+static void ipcon_group_unreg_cleanup(struct ipcon_group_info *igi, struct ipcon_peer_node *self)
+{
+	DEFINE_WAIT(wait);
+	struct ipcon_work *iw = NULL;
+	struct ipcon_kevent *ik;
+
+	flush_workqueue(igi->mc_wq);
+
+	/* clear users */
+	ipcon_clear_multicast_user(igi->group);
+
+	/* send group remove kevent */
+	iw = iw_alloc(ipcon_kevent_worker, sizeof(*ik), GFP_KERNEL);
+	if (iw) {
+		ik = iw->data;
+
+		ik->type = IPCON_EVENT_GRP_REMOVE;
+		nc_getname(igi->nameid, ik->group.name);
+		nc_getname(self->nameid, ik->group.peer_name);
+
+		ipcon_dbg("Group %s.%s@%d removed.\n",
+				ik->group.peer_name,
+				ik->group.name,
+				igi->group);
+
+		queue_work(igi_kernel->mc_wq, &iw->work);
+	}
+
+	/* mark group id be reusable. */
+	unreg_group(ipcon_db, igi->group);
+
+	/* free igi */
+	igi_free(igi);
+}
+
 static int ipcon_grp_unreg(struct sk_buff *skb, struct ipcon_peer_node *self)
 {
 	int ret = 0;
@@ -541,40 +576,8 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct ipcon_peer_node *self)
 
 	nc_id_put(nameid);
 
-	if (!ret) {
-		DEFINE_WAIT(wait);
-		struct ipcon_work *iw = NULL;
-		struct ipcon_kevent *ik;
-
-		flush_workqueue(igi->mc_wq);
-
-		/* clear users */
-		ipcon_clear_multicast_user(igi->group);
-
-		/* send group remove kevent */
-		iw = iw_alloc(ipcon_kevent_worker, sizeof(*ik), GFP_KERNEL);
-		if (iw) {
-			ik = iw->data;
-
-			ik->type = IPCON_EVENT_GRP_REMOVE;
-			nc_getname(igi->nameid, ik->group.name);
-			nc_getname(self->nameid, ik->group.peer_name);
-
-			ipcon_dbg("Group %s.%s@%d removed.\n",
-				ik->group.peer_name,
-				ik->group.name,
-				igi->group);
-
-			queue_work(igi_kernel->mc_wq, &iw->work);
-		}
-
-		/* mark group id be reusable. */
-		unreg_group(ipcon_db, igi->group);
-
-		/* free igi */
-		igi_free(igi);
-
-	}
+	if (!ret)
+		ipcon_group_unreg_cleanup(igi, self);
 
 	ipcon_dbg("exit (%d).\n", ret);
 	return ret;
@@ -1374,30 +1377,7 @@ int kernel_ipcon_unreg_peer(void *handler)
 					igi, igi_hgroup) {
 
 				igi_del(igi);
-				flush_workqueue(igi->mc_wq);
-
-				/* clear users */
-				ipcon_clear_multicast_user(igi->group);
-
-				ipcon_dbg("Group %s.%s@%d removed.\n",
-					nc_refname(ipn->nameid),
-					nc_refname(igi->nameid),
-					igi->group);
-
-				iw_mc = iw_alloc(ipcon_kevent_worker,
-						sizeof(*ik), GFP_KERNEL);
-				if (iw_mc) {
-					ik = iw_mc->data;
-					ik->type = IPCON_EVENT_GRP_REMOVE;
-					nc_getname(igi->nameid, ik->group.name);
-					nc_getname(ipn->nameid,
-							ik->group.peer_name);
-					queue_work(igi_kernel->mc_wq,
-							&iw_mc->work);
-				}
-
-				igi_free(igi);
-				unreg_group(ipcon_db, igi->group);
+				ipcon_group_unreg_cleanup(igi, ipn);
 			}
 		}
 
@@ -1463,8 +1443,6 @@ int kernel_ipcon_unreg_group(void *handler, char *group)
 	do {
 		struct ipcon_peer_node *ipn = handler;
 		struct ipcon_group_info *igi = NULL;
-		struct ipcon_work *iw = NULL;
-		struct ipcon_kevent *ik;
 
 		if (!ipcon_db)
 			break;
@@ -1485,33 +1463,7 @@ int kernel_ipcon_unreg_group(void *handler, char *group)
 
 		igi_del(igi);
 
-		flush_workqueue(igi->mc_wq);
-
-		/* clear users */
-		ipcon_clear_multicast_user(igi->group);
-
-		/* send group remove kevent */
-		iw = iw_alloc(ipcon_kevent_worker, sizeof(*ik), GFP_KERNEL);
-		if (iw) {
-			ik = iw->data;
-
-			ik->type = IPCON_EVENT_GRP_REMOVE;
-			nc_getname(igi->nameid, ik->group.name);
-			nc_getname(ipn->nameid, ik->group.peer_name);
-
-			ipcon_dbg("Group %s.%s@%d removed.\n",
-				ik->group.peer_name,
-				ik->group.name,
-				igi->group);
-
-			queue_work(igi_kernel->mc_wq, &iw->work);
-		}
-
-		/* mark group id be reusable. */
-		unreg_group(ipcon_db, igi->group);
-
-		/* free igi */
-		igi_free(igi);
+		ipcon_group_unreg_cleanup(igi, ipn);
 	} while (0);
 
 	if (group_nameid > 0)
