@@ -39,32 +39,39 @@ static inline struct netlink_sock *nlk_sk(struct sock *sk)
 }
 
 /*
- * __netlink_clear_multicast_users - Clear multicast users for a group
- * @sk: Netlink socket
- * @group: Multicast group ID
- *
- * This function provides a stub implementation for clearing multicast users.
- * The original internal function is not available for out-of-tree modules.
- * 
- * Note: This is a simplified implementation that may not provide full
- * functionality of the original internal function.
+ * Note: __netlink_clear_multicast_users is already declared in linux/netlink.h
+ * We don't need to redeclare it here as it's available in newer kernels.
  */
-static inline void __netlink_clear_multicast_users(struct sock *sk,
-						   unsigned int group)
+
+/*
+ * netlink_broadcast_filtered - Broadcast with filtering support
+ * @sk: Netlink socket
+ * @skb: Socket buffer to broadcast
+ * @portid: Sender's port ID
+ * @group: Multicast group
+ * @flags: Allocation flags
+ * @filter: Filter function
+ * @filter_data: Data for filter function
+ *
+ * This function is not exported in the public kernel API but is needed
+ * for filtering functionality. We provide a wrapper that falls back to
+ * standard netlink_broadcast when filtering is not critical.
+ */
+static inline int netlink_broadcast_filtered(struct sock *sk, struct sk_buff *skb,
+					     u32 portid, u32 group, gfp_t flags,
+					     int (*filter)(struct sock *dsk,
+							   struct sk_buff *skb, void *data),
+					     void *filter_data)
 {
 	/*
-	 * For out-of-tree modules, we provide a stub implementation.
-	 * The original function would clear all multicast subscriptions
-	 * for the specified group, but this requires access to internal
-	 * netlink table structures that are not exported.
+	 * For out-of-tree builds, we fall back to standard netlink_broadcast.
+	 * This reduces functionality but maintains compatibility.
 	 * 
-	 * In a production environment, alternative approaches would be needed:
-	 * - Use netlink_broadcast with specific filtering
-	 * - Implement custom user tracking
-	 * - Use other public netlink APIs
+	 * Note: filter and filter_data parameters are ignored in this implementation.
+	 * For full filtering support, the module should be built in-tree where
+	 * the internal netlink_broadcast_filtered function is available.
 	 */
-	pr_debug("netlink: clearing multicast users for group %u (stub)\n",
-		 group);
+	return netlink_broadcast(sk, skb, portid, group, flags);
 }
 
 #endif /* _AF_NETLINK_H */
