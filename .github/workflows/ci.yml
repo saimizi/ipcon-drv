@@ -102,57 +102,77 @@ jobs:
 
     - name: Build ipcon driver
       run: |
-        cd kernel-build/linux-6.1
+        # Build the module directly without complex Makefile indirection
+        echo "🔨 Building ipcon driver for ${{ matrix.arch }}..."
         
-        # Create a simple Makefile for out-of-tree build
-        cat > ../../Makefile.build << 'EOF'
+        # Create a proper Makefile for kernel module
+        cat > Makefile << 'EOF'
         # SPDX-License-Identifier: GPL-2.0
-        
-        # Kernel build directory
-        KERNEL_DIR ?= kernel-build/linux-6.1
         
         # Module name
         MODULE_NAME := ipcon
         
-        # Source files - match the original Makefile
-        $(MODULE_NAME)-objs := main.o ipcon_nl.o ipcon_msg.o ipcon_db.o name_cache.o
-        $(MODULE_NAME)-$(CONFIG_DEBUG_FS) += ipcon_debugfs.o
+        # Source files - include all objects unconditionally for CI
+        $(MODULE_NAME)-objs := main.o ipcon_nl.o ipcon_msg.o ipcon_db.o name_cache.o ipcon_debugfs.o
         
         obj-m := $(MODULE_NAME).o
         
-        # Enable CONFIG_IPCON and CONFIG_DEBUG_FS
-        EXTRA_CFLAGS += -DCONFIG_IPCON=1 -DCONFIG_DEBUG_FS=1
+        # Enable required CONFIG flags
+        ccflags-y += -DCONFIG_IPCON=1 -DCONFIG_DEBUG_FS=1
         
+        # Default target
         all:
-        	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) modules
+        	$(MAKE) -C $(KERNEL_BUILD_PATH) M=$(PWD) modules
         
         clean:
-        	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) clean
+        	$(MAKE) -C $(KERNEL_BUILD_PATH) M=$(PWD) clean
+        
+        .PHONY: all clean
         EOF
         
-        cd ../..
+        # Set kernel build path
+        export KERNEL_BUILD_PATH=$(pwd)/kernel-build/linux-6.1
+        
+        # Show what we're about to build
+        echo "📁 Source files in directory:"
+        ls -la *.c *.h
+        echo ""
+        echo "📋 Makefile contents:"
+        cat Makefile
+        echo ""
         
         # Build the module
-        echo "🔨 Building ipcon driver for ${{ matrix.arch }}..."
         if [ "${{ matrix.arch }}" = "aarch64" ]; then
-          make -f Makefile.build ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- KERNEL_DIR=kernel-build/linux-6.1 V=1
+          echo "Building for ARM64..."
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- KERNEL_BUILD_PATH=$KERNEL_BUILD_PATH V=1
         else
-          make -f Makefile.build KERNEL_DIR=kernel-build/linux-6.1 V=1
+          echo "Building for x86_64..."
+          make KERNEL_BUILD_PATH=$KERNEL_BUILD_PATH V=1
         fi
         
         # Check if module was built successfully
+        echo "🔍 Checking build results..."
         if [ -f ipcon.ko ]; then
           echo "✅ ipcon.ko built successfully for ${{ matrix.arch }}"
           ls -la ipcon.ko
           file ipcon.ko
-          # Check module info
-          modinfo ipcon.ko || echo "Could not get module info"
+          echo "📊 Module info:"
+          modinfo ipcon.ko || echo "Note: modinfo may not work in CI environment"
+          echo "📈 Module size: $(du -h ipcon.ko)"
         else
           echo "❌ Failed to build ipcon.ko for ${{ matrix.arch }}"
-          echo "Files in current directory:"
+          echo ""
+          echo "📁 Files in current directory:"
           ls -la
-          echo "Looking for any .ko files:"
-          find . -name "*.ko" -ls
+          echo ""
+          echo "🔍 Looking for any .ko files:"
+          find . -name "*.ko" -ls 2>/dev/null || echo "No .ko files found"
+          echo ""
+          echo "🔍 Looking for object files:"
+          find . -name "*.o" -ls 2>/dev/null || echo "No .o files found"
+          echo ""
+          echo "📋 Build log (if any):"
+          find . -name "*.log" -exec cat {} \; 2>/dev/null || echo "No build logs found"
           exit 1
         fi
 
