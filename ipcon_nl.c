@@ -505,7 +505,6 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 
 static void ipcon_group_unreg_cleanup(struct ipcon_group_info *igi, struct ipcon_peer_node *self)
 {
-	DEFINE_WAIT(wait);
 	struct ipcon_work *iw = NULL;
 	struct ipcon_kevent *ik;
 
