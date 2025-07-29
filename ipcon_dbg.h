@@ -5,9 +5,9 @@
 #ifndef __IPCON_DBG_H__
 #define __IPCON_DBG_H__
 
-#define ipcon_err	pr_err
-#define ipcon_warn	pr_warn
-#define ipcon_info	pr_info
+#define ipcon_err pr_err
+#define ipcon_warn pr_warn
+#define ipcon_info pr_info
 #define ipcon_dbg(fmt, ...) \
 	pr_debug("[ipcon] %s-%d " fmt, __func__, __LINE__, ##__VA_ARGS__)
 

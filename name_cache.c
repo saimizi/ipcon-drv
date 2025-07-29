@@ -7,14 +7,13 @@
 
 static struct nc_head *ipcon_nc;
 
-#define NCH_HASH_BIT	4
+#define NCH_HASH_BIT 4
 
 struct nc_entry {
 	struct hlist_node node;
 	char name[IPCON_MAX_NAME_LEN];
 	int id;
 	atomic_t refcnt;
-
 };
 
 struct nc_head {
@@ -54,8 +53,8 @@ static inline void nch_free(struct nc_head *nch)
 		hash_for_each_safe(nch->name_hash, bkt, tmp, nce, node) {
 			if (!atomic_sub_and_test(1, &nce->refcnt))
 				ipcon_warn("name %s is freed with %d users.\n",
-					nce->name,
-					atomic_read(&nce->refcnt));
+					   nce->name,
+					   atomic_read(&nce->refcnt));
 			__nch_detach(nch, nce);
 			kfree(nce);
 		}
@@ -99,7 +98,7 @@ static inline int __nc_add(struct nc_head *nch, char *name, gfp_t flag)
 
 		read_lock(&nch->lock);
 		hash_for_each_possible(nch->name_hash, nce, node,
-				str2hash(name))
+				       str2hash(name))
 			if (!strcmp(nce->name, name)) {
 				atomic_inc(&nce->refcnt);
 				ret = nce->id;
@@ -133,7 +132,6 @@ static inline int __nc_add(struct nc_head *nch, char *name, gfp_t flag)
 	} while (0);
 
 	return ret;
-
 }
 
 static inline int __nc_getid(struct nc_head *nch, char *name)
@@ -142,8 +140,7 @@ static inline int __nc_getid(struct nc_head *nch, char *name)
 	struct nc_entry *nce = NULL;
 
 	read_lock(&nch->lock);
-	hash_for_each_possible(nch->name_hash, nce, node,
-			str2hash(name))
+	hash_for_each_possible(nch->name_hash, nce, node, str2hash(name))
 		if (!strcmp(nce->name, name)) {
 			ret = nce->id;
 			atomic_inc(&nce->refcnt);
@@ -176,8 +173,7 @@ static inline void __nc_name_get(struct nc_head *nch, char *name)
 	struct nc_entry *nce = NULL;
 
 	read_lock(&nch->lock);
-	hash_for_each_possible(nch->name_hash, nce, node,
-			str2hash(name))
+	hash_for_each_possible(nch->name_hash, nce, node, str2hash(name))
 		if (!strcmp(nce->name, name))
 			break;
 
@@ -191,8 +187,7 @@ static inline void __nc_name_put(struct nc_head *nch, char *name)
 	struct nc_entry *nce = NULL;
 
 	write_lock(&nch->lock);
-	hash_for_each_possible(nch->name_hash, nce, node,
-			str2hash(name))
+	hash_for_each_possible(nch->name_hash, nce, node, str2hash(name))
 		if (!strcmp(nce->name, name))
 			break;
 
@@ -215,7 +210,6 @@ static inline int __nc_id_get(struct nc_head *nch, int id)
 
 	return id;
 }
-
 
 static inline void __nc_id_put(struct nc_head *nch, int id)
 {

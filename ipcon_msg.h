@@ -22,13 +22,13 @@ static inline __u32 ipconmsg_seq(struct sk_buff *skb)
 	return nlmsg_hdr(skb)->nlmsg_seq;
 }
 
-int ipconmsg_parse(struct sk_buff *skb,
-	struct nlattr *tb[], int maxtype, const struct nla_policy *policy,
-	struct netlink_ext_ack *extack);
+int ipconmsg_parse(struct sk_buff *skb, struct nlattr *tb[], int maxtype,
+		   const struct nla_policy *policy,
+		   struct netlink_ext_ack *extack);
 struct sk_buff *ipconmsg_new(gfp_t flags);
 
 void *ipconmsg_put(struct sk_buff *skb, __u32 portid, __u32 seq,
-		enum ipcon_msg_type type, int flags);
+		   enum ipcon_msg_type type, int flags);
 
 /**
  * ipconmsg_end - Finalize a ipcon netlink message
@@ -51,4 +51,3 @@ static inline void ipconmsg_cancel(struct sk_buff *skb, void *p)
 }
 
 #endif
-

@@ -6,12 +6,12 @@
 #define __IPCON_H__
 
 /* Netlink protocol id for ipcon */
-#define NETLINK_IPCON		29
+#define NETLINK_IPCON 29
 
-#define IPCON_NAME		"ipcon"
-#define IPCON_KERNEL_GROUP_NAME	"ipcon_kevent"
-#define IPCON_MAX_NAME_LEN	32
-#define IPCON_MAX_GROUP		128
+#define IPCON_NAME "ipcon"
+#define IPCON_KERNEL_GROUP_NAME "ipcon_kevent"
+#define IPCON_MAX_NAME_LEN 32
+#define IPCON_MAX_GROUP 128
 
 enum peer_type {
 	PEER_TYPE_ANON,
@@ -34,17 +34,17 @@ enum ipcon_msg_type {
 	IPCON_TYPE_MAX,
 };
 
-#define IPCON_FLG_ANON_PEER		(1 << 0)
-#define IPCON_FLG_MULTICAST_SYNC	(1 << 1)
-#define IPCON_FLG_DISABL_KEVENT_FILTER	(1 << 2)
-#define IPCON_FLG_RCV_IF		(1 << 3)
-#define IPCON_FLG_SND_IF		(1 << 4)
+#define IPCON_FLG_ANON_PEER (1 << 0)
+#define IPCON_FLG_MULTICAST_SYNC (1 << 1)
+#define IPCON_FLG_DISABL_KEVENT_FILTER (1 << 2)
+#define IPCON_FLG_RCV_IF (1 << 3)
+#define IPCON_FLG_SND_IF (1 << 4)
 
 enum {
 	IPCON_ATTR_UNSPEC,
-	IPCON_ATTR_CPORT,	/* ctrl port */
-	IPCON_ATTR_SPORT,	/* sending port */
-	IPCON_ATTR_RPORT,	/* receiving port */
+	IPCON_ATTR_CPORT, /* ctrl port */
+	IPCON_ATTR_SPORT, /* sending port */
+	IPCON_ATTR_RPORT, /* receiving port */
 	IPCON_ATTR_GROUP,
 	IPCON_ATTR_PEER_NAME,
 	IPCON_ATTR_GROUP_NAME,
@@ -58,12 +58,11 @@ enum {
 };
 
 struct ipconmsghdr {
-	__u32	reserved;
+	__u32 reserved;
 };
 
-#define MAX_IPCONMSG_DATA_SIZE	2048
-#define IPCONMSG_HDRLEN	NLMSG_ALIGN(sizeof(struct ipconmsghdr*))
-
+#define MAX_IPCONMSG_DATA_SIZE 2048
+#define IPCONMSG_HDRLEN NLMSG_ALIGN(sizeof(struct ipconmsghdr *))
 
 static inline int valid_ipcon_group(__u32 group)
 {
