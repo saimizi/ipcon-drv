@@ -15,8 +15,8 @@
 #include "ipcon_dbg.h"
 
 #ifdef IPCON_CI_BUILD
-/* Use local af_netlink.h for CI out-of-tree builds */
-#include "af_netlink.h"
+/* Use test af_netlink.h for CI out-of-tree builds */
+#include "test/af_netlink.h"
 #else
 /* Use kernel internal header for normal builds */
 #include "../af_netlink.h"

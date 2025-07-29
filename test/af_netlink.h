@@ -57,11 +57,11 @@ static inline struct netlink_sock *nlk_sk(struct sock *sk)
  * for filtering functionality. We provide a wrapper that falls back to
  * standard netlink_broadcast when filtering is not critical.
  */
-static inline int netlink_broadcast_filtered(struct sock *sk, struct sk_buff *skb,
-					     u32 portid, u32 group, gfp_t flags,
-					     int (*filter)(struct sock *dsk,
-							   struct sk_buff *skb, void *data),
-					     void *filter_data)
+static inline int netlink_broadcast_filtered(
+	struct sock *sk, struct sk_buff *skb, u32 portid, u32 group,
+	gfp_t flags,
+	int (*filter)(struct sock *dsk, struct sk_buff *skb, void *data),
+	void *filter_data)
 {
 	/*
 	 * For out-of-tree builds, we fall back to standard netlink_broadcast.
