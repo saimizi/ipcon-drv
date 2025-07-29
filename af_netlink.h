@@ -39,8 +39,32 @@ static inline struct netlink_sock *nlk_sk(struct sock *sk)
 }
 
 /*
- * Note: __netlink_clear_multicast_users is already declared in linux/netlink.h
- * We don't need to redeclare it here as it's available in newer kernels.
+ * __netlink_clear_multicast_users - Clear multicast users for a group
+ * @sk: Netlink socket
+ * @group: Multicast group ID
+ *
+ * This function provides a stub implementation for clearing multicast users.
+ * The original internal function is not available for out-of-tree modules.
+ * 
+ * Note: This is a simplified implementation that may not provide full
+ * functionality of the original internal function.
  */
+static inline void __netlink_clear_multicast_users(struct sock *sk,
+						   unsigned int group)
+{
+	/*
+	 * For out-of-tree modules, we provide a stub implementation.
+	 * The original function would clear all multicast subscriptions
+	 * for the specified group, but this requires access to internal
+	 * netlink table structures that are not exported.
+	 * 
+	 * In a production environment, alternative approaches would be needed:
+	 * - Use netlink_broadcast with specific filtering
+	 * - Implement custom user tracking
+	 * - Use other public netlink APIs
+	 */
+	pr_debug("netlink: clearing multicast users for group %u (stub)\n",
+		 group);
+}
 
 #endif /* _AF_NETLINK_H */
