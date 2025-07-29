@@ -80,6 +80,14 @@ static inline int is_anon(struct ipcon_peer_node *ipn)
 }
 
 
+/**
+ * ipcon_clear_multicast_user - Clear all multicast users for a group
+ * @group: The multicast group ID to clear users from
+ *
+ * Clears all multicast users from the specified group across all network
+ * namespaces. This function is typically called during group cleanup to
+ * ensure no stale multicast subscriptions remain.
+ */
 void ipcon_clear_multicast_user(unsigned int group)
 {
 	struct net *net;
@@ -93,6 +101,17 @@ void ipcon_clear_multicast_user(unsigned int group)
 	netlink_table_ungrab();
 }
 
+/**
+ * ipcon_kevent_filter - Filter kernel events for specific peer
+ * @dsk: Destination socket
+ * @skb: Socket buffer containing the event
+ * @data: Filter data (unused)
+ *
+ * Filters kernel events to ensure they are only delivered to the appropriate
+ * peer. Returns 1 if the event should be delivered, 0 otherwise.
+ *
+ * Return: 1 if event should be delivered, 0 if filtered out
+ */
 static int ipcon_kevent_filter(struct sock *dsk, struct sk_buff *skb, void *data)
 {
 	struct ipcon_peer_node *ipn = NULL;
@@ -180,6 +199,17 @@ struct ipcon_work {
 	void *data;
 };
 
+/**
+ * iw_alloc - Allocate and initialize ipcon work structure
+ * @func: Work function to be executed
+ * @datalen: Size of data to allocate for the work
+ * @flags: GFP allocation flags
+ *
+ * Allocates memory for an ipcon_work structure and its associated data,
+ * then initializes the work structure with the provided function.
+ *
+ * Return: Pointer to allocated ipcon_work structure, NULL on failure
+ */
 static struct ipcon_work *iw_alloc(work_func_t func, u32 datalen, gfp_t flags)
 {
 	struct ipcon_work *iw = NULL;
@@ -195,12 +225,26 @@ static struct ipcon_work *iw_alloc(work_func_t func, u32 datalen, gfp_t flags)
 	return iw;
 }
 
+/**
+ * iw_free - Free ipcon work structure and its data
+ * @iw: Pointer to ipcon_work structure to free
+ *
+ * Frees the data buffer and the ipcon_work structure itself.
+ */
 static void iw_free(struct ipcon_work *iw)
 {
 	kfree(iw->data);
 	kfree(iw);
 }
 
+/**
+ * ipcon_kevent_worker - Worker function for processing kernel events
+ * @work: Work structure containing the event data
+ *
+ * Processes kernel events by sending them to userspace via netlink.
+ * Handles various event types including peer registration/unregistration
+ * and group creation/removal events.
+ */
 static void ipcon_kevent_worker(struct work_struct *work)
 {
 	struct ipcon_work *iw = container_of(work, struct ipcon_work, work);
@@ -234,6 +278,14 @@ static void ipcon_kevent_worker(struct work_struct *work)
 	ipcon_dbg("exit.\n");
 }
 
+/**
+ * ipcon_notify_worker - Worker function for peer notification
+ * @work: Work structure containing the port data
+ *
+ * Notifies a newly registered peer about existing peers and groups.
+ * Sends peer registration and group registration events to help the
+ * new peer discover the current system state.
+ */
 static void ipcon_notify_worker(struct work_struct *work)
 {
 	struct ipcon_work *iw = container_of(work, struct ipcon_work, work);
@@ -332,6 +384,13 @@ struct ipcon_multicast_worker_data {
 	struct sk_buff *skb;
 };
 
+/**
+ * ipcon_multicast_worker - Worker function for multicast message handling
+ * @work: Work structure containing multicast data
+ *
+ * Processes multicast messages by forwarding them to the appropriate
+ * multicast group. Skips kernel group messages to avoid loops.
+ */
 static void ipcon_multicast_worker(struct work_struct *work)
 {
 	struct ipcon_work *iw = container_of(work, struct ipcon_work, work);
@@ -347,8 +406,16 @@ static void ipcon_multicast_worker(struct work_struct *work)
 	iw_free(iw);
 }
 
-/*
- * This function is called from another context.
+/**
+ * ipcon_netlink_notify - Netlink notification callback
+ * @nb: Notifier block
+ * @state: Notification state
+ * @_notify: Notification data
+ *
+ * Called by the netlink subsystem when a socket closes. Schedules
+ * cleanup work to handle peer unregistration.
+ *
+ * Return: NOTIFY_DONE on success, NOTIFY_OK otherwise
  */
 static int ipcon_netlink_notify(struct notifier_block *nb,
 			  unsigned long state, void *_notify)
@@ -371,6 +438,16 @@ static int ipcon_netlink_notify(struct notifier_block *nb,
 	return 0;
 }
 
+/**
+ * ipcon_peer_reslove - Resolve peer name to ID
+ * @skb: Socket buffer containing the request
+ * @self: Requesting peer node
+ *
+ * Resolves a peer name to its corresponding ID. This allows peers to
+ * discover each other by name and obtain their numeric identifiers.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 static int ipcon_peer_reslove(struct sk_buff *skb, struct ipcon_peer_node *self)
 {
 	int ret = 0;
@@ -468,6 +545,16 @@ static int ipn_reg_group(struct ipcon_peer_node *ipn, int nameid,
 	return ret;
 }
 
+/**
+ * ipcon_grp_reg - Register a new multicast group
+ * @skb: Socket buffer containing the registration request
+ * @self: Peer node requesting the registration
+ *
+ * Registers a new multicast group for the peer. Creates the group
+ * infrastructure and notifies other peers about the new group.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 static int ipcon_grp_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 {
 	int ret = 0;
@@ -503,6 +590,15 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 	return ret;
 }
 
+/**
+ * ipcon_group_unreg_cleanup - Clean up resources for group unregistration
+ * @igi: Group information structure to clean up
+ * @self: Peer node that owned the group
+ *
+ * Performs cleanup operations when a group is unregistered, including
+ * flushing workqueues, clearing multicast users, sending removal events,
+ * and freeing resources.
+ */
 static void ipcon_group_unreg_cleanup(struct ipcon_group_info *igi, struct ipcon_peer_node *self)
 {
 	struct ipcon_work *iw = NULL;
@@ -537,6 +633,16 @@ static void ipcon_group_unreg_cleanup(struct ipcon_group_info *igi, struct ipcon
 	igi_free(igi);
 }
 
+/**
+ * ipcon_grp_unreg - Unregister a multicast group
+ * @skb: Socket buffer containing the unregistration request
+ * @self: Peer node requesting the unregistration
+ *
+ * Unregisters a multicast group owned by the peer. Performs cleanup
+ * and notifies other peers about the group removal.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 static int ipcon_grp_unreg(struct sk_buff *skb, struct ipcon_peer_node *self)
 {
 	int ret = 0;
@@ -582,6 +688,17 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct ipcon_peer_node *self)
 	return ret;
 }
 
+/**
+ * ipcon_grp_reslove - Resolve group name to ID
+ * @skb: Socket buffer containing the resolution request
+ * @self: Requesting peer node
+ *
+ * Resolves a group name to its corresponding multicast group ID.
+ * This allows peers to discover groups by name and obtain their
+ * numeric identifiers for multicast operations.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 static int ipcon_grp_reslove(struct sk_buff *skb, struct ipcon_peer_node *self)
 {
 	int ret = 0;
@@ -737,6 +854,16 @@ int ipcon_multicast(struct sk_buff *skb, __u32 exclusive_port,
 			flags, NULL, NULL);
 }
 
+/**
+ * ipcon_unicast_msg - Handle unicast message requests
+ * @skb: Socket buffer containing the message
+ * @self: Sending peer node
+ *
+ * Processes unicast message requests by resolving the target peer
+ * and forwarding the message to that peer's port.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 static int ipcon_unicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self)
 {
 	int ret = 0;
@@ -811,6 +938,16 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self)
 	return ret;
 }
 
+/**
+ * ipcon_multicast_msg - Handle multicast message requests
+ * @skb: Socket buffer containing the message
+ * @self: Sending peer node
+ *
+ * Processes multicast message requests by resolving the target group
+ * and forwarding the message to all group members.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 static int ipcon_multicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self)
 {
 	int ret = 0;
@@ -915,6 +1052,16 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self
 	return ret;
 }
 
+/**
+ * ipcon_peer_reg - Register a new peer
+ * @skb: Socket buffer containing the registration request
+ * @self: Peer node to register (may be updated with new information)
+ *
+ * Registers a new peer in the system, setting up its name, ports, and
+ * capabilities. Notifies other peers about the new peer registration.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 static int ipcon_peer_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 {
 	int ret = 0;
@@ -1023,6 +1170,14 @@ static struct notifier_block ipcon_netlink_notifier = {
 	.notifier_call = ipcon_netlink_notify,
 };
 
+/**
+ * ipcon_kernel_init - Initialize kernel peer
+ *
+ * Initializes the kernel peer that handles system-level operations
+ * and event distribution. Creates the kernel group for system events.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 static int ipcon_kernel_init(void)
 {
 	int ret = 0;
@@ -1105,6 +1260,12 @@ static int ipcon_kernel_init(void)
 	return ret;
 }
 
+/**
+ * ipcon_kernel_destroy - Cleanup kernel peer resources
+ *
+ * Destroys the kernel peer and cleans up all associated resources
+ * including workqueues and registered groups.
+ */
 static void ipcon_kernel_destroy(void)
 {
 	nc_exit();
@@ -1196,6 +1357,14 @@ static int ipcon_rcv(struct sk_buff *skb, struct nlmsghdr *nlh,
 	return ret;
 }
 
+/**
+ * ipcon_nl_rcv_msg - Main netlink message receive handler
+ * @skb: Socket buffer containing the received message
+ *
+ * Main entry point for processing netlink messages from userspace.
+ * Serializes message processing using a mutex to protect internal
+ * data structures from concurrent access.
+ */
 void ipcon_nl_rcv_msg(struct sk_buff *skb)
 {
 	/*
@@ -1213,6 +1382,14 @@ void ipcon_nl_rcv_msg(struct sk_buff *skb)
 	mutex_unlock(&ipcon_mutex);
 }
 
+/**
+ * ipcon_nl_init - Initialize the ipcon netlink subsystem
+ *
+ * Initializes the ipcon netlink subsystem including the netlink socket,
+ * kernel peer, and notification handlers.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 int ipcon_nl_init(void)
 {
 	int ret = 0;
@@ -1248,13 +1425,27 @@ int ipcon_nl_init(void)
 	return ret;
 }
 
+/**
+ * ipcon_nl_exit - Cleanup the ipcon netlink subsystem
+ *
+ * Cleans up all resources allocated by the ipcon netlink subsystem
+ * including the netlink socket, kernel peer, and notification handlers.
+ */
 void ipcon_nl_exit(void)
 {
 	netlink_unregister_notifier(&ipcon_netlink_notifier);
 	ipcon_kernel_destroy();
 }
 
-
+/**
+ * kernel_ipcon_reg_peer - Register a kernel peer
+ * @name: Name of the peer to register
+ *
+ * Registers a kernel-mode peer that can participate in ipcon communication.
+ * Used by kernel modules to create a communication endpoint.
+ *
+ * Return: Opaque peer handle on success, NULL on failure
+ */
 void *kernel_ipcon_reg_peer(char *name)
 {
 	int ret = 1;
@@ -1324,6 +1515,15 @@ void *kernel_ipcon_reg_peer(char *name)
 }
 EXPORT_SYMBOL(kernel_ipcon_reg_peer);
 
+/**
+ * valid_kernel_ipcon_peer - Validate a kernel peer handle
+ * @handler: Peer handle to validate
+ *
+ * Validates that a peer handle is still valid and refers to an
+ * active kernel peer in the system.
+ *
+ * Return: 1 if valid, 0 if invalid
+ */
 int valid_kernel_ipcon_peer(void *handler)
 {
 	int ret = 0;
@@ -1349,6 +1549,15 @@ int valid_kernel_ipcon_peer(void *handler)
 }
 EXPORT_SYMBOL(valid_kernel_ipcon_peer);
 
+/**
+ * kernel_ipcon_unreg_peer - Unregister a kernel peer
+ * @handler: Peer handle to unregister
+ *
+ * Unregisters a kernel peer and cleans up all associated resources
+ * including groups and sends notifications to other peers.
+ *
+ * Return: 0 on success, positive value on failure
+ */
 int kernel_ipcon_unreg_peer(void *handler)
 {
 	int ret = 1;
@@ -1396,6 +1605,16 @@ int kernel_ipcon_unreg_peer(void *handler)
 }
 EXPORT_SYMBOL(kernel_ipcon_unreg_peer);
 
+/**
+ * kernel_ipcon_reg_group - Register a multicast group for kernel peer
+ * @handler: Peer handle
+ * @group: Name of the group to register
+ *
+ * Registers a multicast group for a kernel peer, allowing it to
+ * receive multicast messages sent to that group.
+ *
+ * Return: 0 on success, positive value on failure
+ */
 int kernel_ipcon_reg_group(void *handler, char *group)
 {
 	int ret = 1;
@@ -1434,6 +1653,16 @@ int kernel_ipcon_reg_group(void *handler, char *group)
 }
 EXPORT_SYMBOL(kernel_ipcon_reg_group);
 
+/**
+ * kernel_ipcon_unreg_group - Unregister a multicast group for kernel peer
+ * @handler: Peer handle
+ * @group: Name of the group to unregister
+ *
+ * Unregisters a multicast group for a kernel peer and performs cleanup
+ * of associated resources.
+ *
+ * Return: 0 on success, positive value on failure
+ */
 int kernel_ipcon_unreg_group(void *handler, char *group)
 {
 	int ret = 1;
@@ -1472,6 +1701,19 @@ int kernel_ipcon_unreg_group(void *handler, char *group)
 }
 EXPORT_SYMBOL(kernel_ipcon_unreg_group);
 
+/**
+ * kernel_ipcon_multicast_msg - Send multicast message from kernel peer
+ * @handler: Peer handle
+ * @group_name: Target group name
+ * @buf: Message buffer
+ * @len: Message length
+ * @sync: Synchronous delivery flag
+ *
+ * Sends a multicast message from a kernel peer to all members of the
+ * specified group.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 int kernel_ipcon_multicast_msg(void *handler, char *group_name,
 			char *buf, int len, int sync)
 {
