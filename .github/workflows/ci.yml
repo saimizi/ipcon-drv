@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ master ]
+  push:
+    branches: [ master ]
+
+jobs:
+  code-style:
+    name: Code Style Check
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install clang-format
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-format
+
+    - name: Check code formatting
+      run: |
+        # Find all C source files and check formatting
+        find . -name "*.c" -o -name "*.h" | while read file; do
+          echo "Checking $file..."
+          clang-format --dry-run --Werror "$file"
+          if [ $? -ne 0 ]; then
+            echo "❌ $file is not properly formatted"
+            echo "Run: clang-format -i $file"
+            exit 1
+          fi
+        done
+        echo "✅ All files are properly formatted"
+
+  build-test:
+    name: Build Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential bc kmod cpio flex bison libssl-dev libelf-dev
+
+    - name: Install cross-compilation tools for ARM64
+      if: matrix.arch == 'aarch64'
+      run: |
+        sudo apt-get install -y gcc-aarch64-linux-gnu
+
+    - name: Download kernel headers
+      run: |
+        # Use a recent stable kernel version
+        KERNEL_VERSION="6.1.0"
+        
+        # Create a minimal kernel build environment
+        mkdir -p kernel-build
+        cd kernel-build
+        
+        # Download kernel source (headers only approach)
+        wget -q https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.tar.xz
+        tar -xf linux-6.1.tar.xz
+        cd linux-6.1
+        
+        # Prepare kernel build
+        if [ "${{ matrix.arch }}" = "aarch64" ]; then
+          make ARCH=arm64 defconfig
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
+        else
+          make defconfig  
+          make modules_prepare
+        fi
+
+    - name: Build ipcon driver
+      run: |
+        cd kernel-build/linux-6.1
+        
+        # Copy our driver source
+        mkdir -p drivers/ipcon
+        cp -r ../../*.c ../../*.h ../../Kconfig ../../Makefile drivers/ipcon/
+        
+        # Create a simple Makefile for out-of-tree build
+        cat > ../../Makefile.build << 'EOF'
+        # SPDX-License-Identifier: GPL-2.0
+        
+        # Kernel build directory
+        KERNEL_DIR ?= kernel-build/linux-6.1
+        
+        # Module name
+        MODULE_NAME := ipcon
+        
+        # Source files
+        $(MODULE_NAME)-objs := main.o ipcon_nl.o ipcon_msg.o ipcon_db.o name_cache.o ipcon_debugfs.o
+        
+        obj-m := $(MODULE_NAME).o
+        
+        all:
+        	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) modules
+        
+        clean:
+        	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) clean
+        EOF
+        
+        cd ../..
+        
+        # Build the module
+        if [ "${{ matrix.arch }}" = "aarch64" ]; then
+          make -f Makefile.build ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- KERNEL_DIR=kernel-build/linux-6.1
+        else
+          make -f Makefile.build KERNEL_DIR=kernel-build/linux-6.1
+        fi
+        
+        # Check if module was built successfully
+        if [ -f ipcon.ko ]; then
+          echo "✅ ipcon.ko built successfully for ${{ matrix.arch }}"
+          file ipcon.ko
+        else
+          echo "❌ Failed to build ipcon.ko for ${{ matrix.arch }}"
+          exit 1
+        fi
+
+    - name: Build verification
+      run: |
+        echo "Build completed for ${{ matrix.arch }}"
+        ls -la *.ko || echo "No .ko files found"
