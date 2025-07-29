@@ -118,7 +118,7 @@ jobs:
         obj-m := $(MODULE_NAME).o
         
         # Enable required CONFIG flags
-        ccflags-y += -DCONFIG_IPCON=1 -DCONFIG_DEBUG_FS=1
+        ccflags-y += -DCONFIG_IPCON=1 -DCONFIG_DEBUG_FS=1 -DIPCON_CI_BUILD=1
         
         # Default target
         all:
