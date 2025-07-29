@@ -1,0 +1,182 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ master ]
+  push:
+    branches: [ master ]
+
+jobs:
+  code-style:
+    name: Code Style Check
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install clang-format
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-format
+
+    - name: Check code formatting
+      run: |
+        # Find all C source files and check formatting
+        echo "🔍 Checking code formatting with Linux kernel style..."
+        
+        # Create a temporary file to track issues
+        FORMAT_ERRORS=$(mktemp)
+        
+        # Check each file
+        for file in $(find . -name "*.c" -o -name "*.h"); do
+          echo "Checking $file..."
+          if ! clang-format --dry-run --Werror "$file" >/dev/null 2>&1; then
+            echo "❌ $file has formatting issues"
+            echo "$file" >> "$FORMAT_ERRORS"
+          else
+            echo "✅ $file is properly formatted"
+          fi
+        done
+        
+        # Check if we have any errors
+        if [ -s "$FORMAT_ERRORS" ]; then
+          echo ""
+          echo "🚨 Found formatting issues in the following files:"
+          cat "$FORMAT_ERRORS"
+          echo ""
+          echo "To fix all formatting issues, run:"
+          echo "  find . -name '*.c' -o -name '*.h' | xargs clang-format -i"
+          echo ""
+          echo "Example of formatting issues in $(head -1 "$FORMAT_ERRORS"):"
+          clang-format --dry-run --Werror "$(head -1 "$FORMAT_ERRORS")" 2>&1 | head -10 || true
+          rm "$FORMAT_ERRORS"
+          exit 1
+        else
+          echo "✅ All files are properly formatted"
+          rm "$FORMAT_ERRORS"
+        fi
+
+  build-test:
+    name: Build Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential bc kmod cpio flex bison libssl-dev libelf-dev
+
+    - name: Install cross-compilation tools for ARM64
+      if: matrix.arch == 'aarch64'
+      run: |
+        sudo apt-get install -y gcc-aarch64-linux-gnu
+
+    - name: Download kernel headers
+      run: |
+        # Use a recent stable kernel version
+        KERNEL_VERSION="6.1.0"
+        
+        # Create a minimal kernel build environment
+        mkdir -p kernel-build
+        cd kernel-build
+        
+        # Download kernel source (headers only approach)
+        wget -q https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.tar.xz
+        tar -xf linux-6.1.tar.xz
+        cd linux-6.1
+        
+        # Prepare kernel build
+        if [ "${{ matrix.arch }}" = "aarch64" ]; then
+          make ARCH=arm64 defconfig
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
+        else
+          make defconfig  
+          make modules_prepare
+        fi
+
+    - name: Build ipcon driver
+      run: |
+        # Build the module directly without complex Makefile indirection
+        echo "🔨 Building ipcon driver for ${{ matrix.arch }}..."
+        
+        # Create a proper Makefile for kernel module
+        cat > Makefile << 'EOF'
+        # SPDX-License-Identifier: GPL-2.0
+        
+        # Module name
+        MODULE_NAME := ipcon
+        
+        # Source files - include all objects unconditionally for CI
+        $(MODULE_NAME)-objs := main.o ipcon_nl.o ipcon_msg.o ipcon_db.o name_cache.o ipcon_debugfs.o
+        
+        obj-m := $(MODULE_NAME).o
+        
+        # Enable required CONFIG flags
+        ccflags-y += -DCONFIG_IPCON=1 -DCONFIG_DEBUG_FS=1 -DIPCON_CI_BUILD=1
+        
+        # Default target
+        all:
+        	$(MAKE) -C $(KERNEL_BUILD_PATH) M=$(PWD) modules
+        
+        clean:
+        	$(MAKE) -C $(KERNEL_BUILD_PATH) M=$(PWD) clean
+        
+        .PHONY: all clean
+        EOF
+        
+        # Set kernel build path
+        export KERNEL_BUILD_PATH=$(pwd)/kernel-build/linux-6.1
+        
+        # Show what we're about to build
+        echo "📁 Source files in directory:"
+        ls -la *.c *.h
+        echo ""
+        echo "📋 Makefile contents:"
+        cat Makefile
+        echo ""
+        
+        # Build the module
+        if [ "${{ matrix.arch }}" = "aarch64" ]; then
+          echo "Building for ARM64..."
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- KERNEL_BUILD_PATH=$KERNEL_BUILD_PATH V=1
+        else
+          echo "Building for x86_64..."
+          make KERNEL_BUILD_PATH=$KERNEL_BUILD_PATH V=1
+        fi
+        
+        # Check if module was built successfully
+        echo "🔍 Checking build results..."
+        if [ -f ipcon.ko ]; then
+          echo "✅ ipcon.ko built successfully for ${{ matrix.arch }}"
+          ls -la ipcon.ko
+          file ipcon.ko
+          echo "📊 Module info:"
+          modinfo ipcon.ko || echo "Note: modinfo may not work in CI environment"
+          echo "📈 Module size: $(du -h ipcon.ko)"
+        else
+          echo "❌ Failed to build ipcon.ko for ${{ matrix.arch }}"
+          echo ""
+          echo "📁 Files in current directory:"
+          ls -la
+          echo ""
+          echo "🔍 Looking for any .ko files:"
+          find . -name "*.ko" -ls 2>/dev/null || echo "No .ko files found"
+          echo ""
+          echo "🔍 Looking for object files:"
+          find . -name "*.o" -ls 2>/dev/null || echo "No .o files found"
+          echo ""
+          echo "📋 Build log (if any):"
+          find . -name "*.log" -exec cat {} \; 2>/dev/null || echo "No build logs found"
+          exit 1
+        fi
+
+    - name: Build verification
+      run: |
+        echo "Build completed for ${{ matrix.arch }}"
+        ls -la *.ko || echo "No .ko files found"

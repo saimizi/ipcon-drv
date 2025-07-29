@@ -6,7 +6,6 @@
 #include "ipcon.h"
 #include "ipcon_dbg.h"
 
-
 static inline unsigned long str2hash(char *s)
 {
 	unsigned long hash = init_name_hash(0);

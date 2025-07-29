@@ -14,14 +14,12 @@
  * @policy: validation policy
  * @extack: extended ACK report struct
  */
-int ipconmsg_parse(struct sk_buff *skb,
-				struct nlattr *tb[], int maxtype,
-				const struct nla_policy *policy,
-				struct netlink_ext_ack *extack)
+int ipconmsg_parse(struct sk_buff *skb, struct nlattr *tb[], int maxtype,
+		   const struct nla_policy *policy,
+		   struct netlink_ext_ack *extack)
 {
-	return nlmsg_parse(nlmsg_hdr(skb),
-			IPCONMSG_HDRLEN,
-			tb, maxtype, policy, extack);
+	return nlmsg_parse(nlmsg_hdr(skb), IPCONMSG_HDRLEN, tb, maxtype, policy,
+			   extack);
 }
 
 /**
@@ -45,7 +43,7 @@ __u32 ipconmsg_global_seq;
  * Returns pointer to user specific header
  */
 void *ipconmsg_put(struct sk_buff *skb, __u32 portid, __u32 seq,
-		enum ipcon_msg_type type, int flags)
+		   enum ipcon_msg_type type, int flags)
 {
 	struct nlmsghdr *nlh;
 	struct ipconmsghdr *hdr;
@@ -60,5 +58,5 @@ void *ipconmsg_put(struct sk_buff *skb, __u32 portid, __u32 seq,
 	hdr = nlmsg_data(nlh);
 	hdr->reserved = ++ipconmsg_global_seq;
 
-	return (char *) hdr + IPCONMSG_HDRLEN;
+	return (char *)hdr + IPCONMSG_HDRLEN;
 }

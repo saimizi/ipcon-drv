@@ -21,7 +21,7 @@ u32 MaxGroupNum = IPCON_MAX_GROUP;
 u32 MaxNameLength = IPCON_MAX_NAME_LEN;
 
 static ssize_t entry_file_read(struct file *fp, char __user *user_buffer,
-				size_t count, loff_t *position)
+			       size_t count, loff_t *position)
 {
 	char buf[512];
 	char *p = NULL;
@@ -32,7 +32,6 @@ static ssize_t entry_file_read(struct file *fp, char __user *user_buffer,
 	if (!ipn)
 		return -EBADF;
 
-
 	ipn_rd_lock(ipn);
 	do {
 		unsigned long bkt;
@@ -41,59 +40,53 @@ static ssize_t entry_file_read(struct file *fp, char __user *user_buffer,
 
 		p = buf;
 		/* Peer Name */
-		len = sprintf(p, "%-15s%s\n", "Name:",
-				nc_refname(ipn->nameid));
+		len = sprintf(p, "%-15s%s\n", "Name:", nc_refname(ipn->nameid));
 		p += len;
 
 		/* Process Name */
-		len = sprintf(p, "%-15s%s\n", "Comm:",
-				nc_refname(ipn->commid));
+		len = sprintf(p, "%-15s%s\n", "Comm:", nc_refname(ipn->commid));
 		p += len;
 
 		/* Process PID*/
-		len = sprintf(p, "%-15s%u\n", "PID:",
-				ipn->pid);
+		len = sprintf(p, "%-15s%u\n", "PID:", ipn->pid);
 		p += len;
 
 		/* Ctrl port */
 		if (ipn->ctrl_port != IPCON_INVALID_PORT) {
 			len = sprintf(p, "%-15s%lu\n", "CtrlPort:",
-				(unsigned long)ipn->ctrl_port);
+				      (unsigned long)ipn->ctrl_port);
 			p += len;
 		}
 
 		/* Send port */
 		if (ipn->snd_port != IPCON_INVALID_PORT) {
 			len = sprintf(p, "%-15s%lu\n", "SendPort:",
-				(unsigned long)ipn->snd_port);
+				      (unsigned long)ipn->snd_port);
 			p += len;
 		}
 
 		/* Receive port */
 		if (ipn->rcv_port != IPCON_INVALID_PORT) {
-			len = sprintf(p, "%-15s%lu\n", "RcvPort:",
-				(unsigned long)ipn->rcv_port);
+			len = sprintf(p, "%-15s%lu\n",
+				      "RcvPort:", (unsigned long)ipn->rcv_port);
 			p += len;
 		}
 
 		len = sprintf(p, "Groups:\n");
 		p += len;
 
-		hash_for_each_safe(ipn->ipn_group_ht, bkt, tmp, igi, igi_hgroup) {
-			len = sprintf(p, "%32s %d\n",
-				nc_refname(igi->nameid), igi->group);
+		hash_for_each_safe(ipn->ipn_group_ht, bkt, tmp, igi,
+				   igi_hgroup) {
+			len = sprintf(p, "%32s %d\n", nc_refname(igi->nameid),
+				      igi->group);
 			p += len;
 		}
 
 	} while (0);
 	ipn_rd_unlock(ipn);
 
-
-	ret = simple_read_from_buffer(user_buffer,
-				count,
-				position,
-				buf,
-				strlen(buf) + 1);
+	ret = simple_read_from_buffer(user_buffer, count, position, buf,
+				      strlen(buf) + 1);
 
 	return ret;
 }
@@ -108,15 +101,9 @@ int ipcon_debugfs_init(void)
 
 	diret = debugfs_create_dir("ipcon", NULL);
 
-	debugfs_create_u32("MaxGroupNum",
-			0644,
-			diret,
-			&MaxGroupNum);
+	debugfs_create_u32("MaxGroupNum", 0644, diret, &MaxGroupNum);
 
-	debugfs_create_u32("MaxNameLength",
-			0644,
-			diret,
-			&MaxNameLength);
+	debugfs_create_u32("MaxNameLength", 0644, diret, &MaxNameLength);
 
 	named_peers = debugfs_create_dir("NamedPeers", diret);
 	anon_peers = debugfs_create_dir("AnonPeers", diret);
@@ -134,14 +121,10 @@ void ipcon_debugfs_add_entry(struct ipcon_peer_node *ipn)
 
 	if (ipn->type == PEER_TYPE_NORMAL || ipn->type == PEER_TYPE_KERNEL)
 		parent = named_peers;
-	else 
+	else
 		parent = anon_peers;
 
-
-	d = debugfs_create_file(nc_refname(ipn->nameid),
-				0644,
-				parent,
-				ipn,
+	d = debugfs_create_file(nc_refname(ipn->nameid), 0644, parent, ipn,
 				&ipcon_debugfs_fops);
 
 	ipn->d = d;

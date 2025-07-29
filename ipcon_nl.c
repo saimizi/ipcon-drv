@@ -13,13 +13,20 @@
 #include "ipcon_db.h"
 #include "name_cache.h"
 #include "ipcon_dbg.h"
+
+#ifdef IPCON_CI_BUILD
+/* Use test af_netlink.h for CI out-of-tree builds */
+#include "test/af_netlink.h"
+#else
+/* Use kernel internal header for normal builds */
 #include "../af_netlink.h"
+#endif
 
 void *kernel_ipcon_reg_peer(char *name);
 int valid_kernel_ipcon_peer(void *handler);
 int kernel_ipcon_reg_group(void *handler, char *group);
-int kernel_ipcon_multicast_msg(void *handler, char *group_name,
-			char *buf, int len, int sync);
+int kernel_ipcon_multicast_msg(void *handler, char *group_name, char *buf,
+			       int len, int sync);
 
 #ifdef CONFIG_DEBUG_FS
 #include "ipcon_debugfs.h"
@@ -29,7 +36,7 @@ int kernel_ipcon_multicast_msg(void *handler, char *group_name,
  * - inclue/net/netlink.h
  */
 
-#define UNUSED_GROUP_NAME	"ipconG"
+#define UNUSED_GROUP_NAME "ipconG"
 
 static struct sock *ipcon_nl_sock;
 static struct ipcon_peer_db *ipcon_db;
@@ -79,7 +86,6 @@ static inline int is_anon(struct ipcon_peer_node *ipn)
 	return (ipn->type == PEER_TYPE_ANON);
 }
 
-
 /**
  * ipcon_clear_multicast_user - Clear all multicast users for a group
  * @group: The multicast group ID to clear users from
@@ -112,7 +118,8 @@ void ipcon_clear_multicast_user(unsigned int group)
  *
  * Return: 1 if event should be delivered, 0 if filtered out
  */
-static int ipcon_kevent_filter(struct sock *dsk, struct sk_buff *skb, void *data)
+static int ipcon_kevent_filter(struct sock *dsk, struct sk_buff *skb,
+			       void *data)
 {
 	struct ipcon_peer_node *ipn = NULL;
 	unsigned long ipn_flags;
@@ -121,11 +128,11 @@ static int ipcon_kevent_filter(struct sock *dsk, struct sk_buff *skb, void *data
 	ipn = ipd_lookup_byrport(ipcon_db, nlk_sk(dsk)->portid);
 	if (!ipn) {
 		ipcon_warn("Drop multicast msg to suspicious port %lu\n",
-			(unsigned long)nlk_sk(dsk)->portid);
+			   (unsigned long)nlk_sk(dsk)->portid);
 		return 1;
 	}
 
-	if (ipn  == ipn_kernel)
+	if (ipn == ipn_kernel)
 		return 1;
 
 	/* no real socket for PEER_TYPE_KERNEL exist */
@@ -172,27 +179,22 @@ static int ipcon_kevent_filter(struct sock *dsk, struct sk_buff *skb, void *data
 
 			if (group_name)
 				ipcon_dbg("Drop notify to %s : %s %s %s\n",
-					nc_refname(ipn->nameid),
-					event,
-					peer_name,
-					group_name);
+					  nc_refname(ipn->nameid), event,
+					  peer_name, group_name);
 			else
 				ipcon_dbg("Drop notify to %s : %s %s\n",
-					nc_refname(ipn->nameid),
-					event,
-					peer_name);
+					  nc_refname(ipn->nameid), event,
+					  peer_name);
 		}
 	} while (0);
 
 	if (!skip) {
-		ipcon_dbg("Multicast to %s@%lu.\n",
-			nc_refname(ipn->nameid),
-			(unsigned long)ipn_rcvport(ipn));
+		ipcon_dbg("Multicast to %s@%lu.\n", nc_refname(ipn->nameid),
+			  (unsigned long)ipn_rcvport(ipn));
 	}
 
 	return skip;
 }
-
 
 struct ipcon_work {
 	struct work_struct work;
@@ -253,7 +255,7 @@ static void ipcon_kevent_worker(struct work_struct *work)
 	ipcon_dbg("enter kevent: %d\n", ik->type);
 
 	do {
-		struct sk_buff	*msg = ipconmsg_new(GFP_KERNEL);
+		struct sk_buff *msg = ipconmsg_new(GFP_KERNEL);
 		void *p = NULL;
 
 		if (!msg) {
@@ -265,13 +267,13 @@ static void ipcon_kevent_worker(struct work_struct *work)
 
 		nla_put_string(msg, IPCON_ATTR_PEER_NAME, IPCON_NAME);
 		nla_put_string(msg, IPCON_ATTR_GROUP_NAME,
-				IPCON_KERNEL_GROUP_NAME);
+			       IPCON_KERNEL_GROUP_NAME);
 		nla_put(msg, IPCON_ATTR_DATA, sizeof(*ik), ik);
 
 		ipconmsg_end(msg, p);
 
 		ipcon_multicast_filtered(msg, 0, IPCON_KERNEL_GROUP, GFP_KERNEL,
-				ipcon_kevent_filter, ik);
+					 ipcon_kevent_filter, ik);
 
 		iw_free(iw);
 	} while (0);
@@ -323,8 +325,8 @@ static void ipcon_notify_worker(struct work_struct *work)
 #endif
 
 		if (!hash_empty(ipn->ipn_group_ht)) {
-			hash_for_each_safe(ipn->ipn_group_ht, bkt, tmp,
-					igi, igi_hgroup) {
+			hash_for_each_safe(ipn->ipn_group_ht, bkt, tmp, igi,
+					   igi_hgroup) {
 				struct ipcon_work *iw_mc = NULL;
 
 				igi_del(igi);
@@ -334,22 +336,20 @@ static void ipcon_notify_worker(struct work_struct *work)
 				/* clear users */
 				ipcon_clear_multicast_user(igi->group);
 
-
 				ipcon_dbg("Group %s.%s@%d removed.\n",
-					nc_refname(ipn->nameid),
-					nc_refname(igi->nameid),
-					igi->group);
+					  nc_refname(ipn->nameid),
+					  nc_refname(igi->nameid), igi->group);
 
 				iw_mc = iw_alloc(ipcon_kevent_worker,
-						sizeof(*ik), GFP_KERNEL);
+						 sizeof(*ik), GFP_KERNEL);
 				if (iw_mc) {
 					ik = iw_mc->data;
 					ik->type = IPCON_EVENT_GRP_REMOVE;
 					nc_getname(igi->nameid, ik->group.name);
 					nc_getname(ipn->nameid,
-							ik->group.peer_name);
+						   ik->group.peer_name);
 					queue_work(igi_kernel->mc_wq,
-							&iw_mc->work);
+						   &iw_mc->work);
 				}
 
 				igi_free(igi);
@@ -380,7 +380,7 @@ static void ipcon_notify_worker(struct work_struct *work)
 
 struct ipcon_multicast_worker_data {
 	struct ipcon_group_info *igi;
-	__u32	sender_port;
+	__u32 sender_port;
 	struct sk_buff *skb;
 };
 
@@ -417,8 +417,8 @@ static void ipcon_multicast_worker(struct work_struct *work)
  *
  * Return: NOTIFY_DONE on success, NOTIFY_OK otherwise
  */
-static int ipcon_netlink_notify(struct notifier_block *nb,
-			  unsigned long state, void *_notify)
+static int ipcon_netlink_notify(struct notifier_block *nb, unsigned long state,
+				void *_notify)
 {
 	struct netlink_notify *n = _notify;
 	struct ipcon_work *iw = NULL;
@@ -458,8 +458,8 @@ static int ipcon_peer_reslove(struct sk_buff *skb, struct ipcon_peer_node *self)
 
 	ipcon_dbg("enter.\n");
 	do {
-		ret = ipconmsg_parse(skb, tb, IPCON_ATTR_MAX,
-				ipcon_policy, NULL);
+		ret = ipconmsg_parse(skb, tb, IPCON_ATTR_MAX, ipcon_policy,
+				     NULL);
 		if (ret < 0)
 			break;
 
@@ -478,18 +478,16 @@ static int ipcon_peer_reslove(struct sk_buff *skb, struct ipcon_peer_node *self)
 		if (nameid < 0)
 			return nameid;
 
-		ipn_add_filter(self, IPCON_EVENT_PEER_ADD,
-				nameid, 0, GFP_KERNEL);
-		ipn_add_filter(self, IPCON_EVENT_PEER_REMOVE,
-				nameid, 0, GFP_KERNEL);
+		ipn_add_filter(self, IPCON_EVENT_PEER_ADD, nameid, 0,
+			       GFP_KERNEL);
+		ipn_add_filter(self, IPCON_EVENT_PEER_REMOVE, nameid, 0,
+			       GFP_KERNEL);
 
 		ipn = ipd_lookup_byname(ipcon_db, nameid);
 		if (!ipn)
 			ret = -ENOENT;
 
 		nc_id_put(nameid);
-
-
 
 	} while (0);
 
@@ -498,7 +496,7 @@ static int ipcon_peer_reslove(struct sk_buff *skb, struct ipcon_peer_node *self)
 }
 
 static int ipn_reg_group(struct ipcon_peer_node *ipn, int nameid,
-		unsigned int group)
+			 unsigned int group)
 {
 	int ret = 0;
 	struct ipcon_group_info *igi = NULL;
@@ -534,9 +532,7 @@ static int ipn_reg_group(struct ipcon_peer_node *ipn, int nameid,
 			nc_getname(ipn->nameid, ik->group.peer_name);
 
 			ipcon_dbg("Group %s.%s@%d registered.\n",
-				ik->group.peer_name,
-				ik->group.name,
-				group);
+				  ik->group.peer_name, ik->group.name, group);
 			queue_work(igi_kernel->mc_wq, &iw->work);
 		}
 	} while (0);
@@ -599,7 +595,8 @@ static int ipcon_grp_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
  * flushing workqueues, clearing multicast users, sending removal events,
  * and freeing resources.
  */
-static void ipcon_group_unreg_cleanup(struct ipcon_group_info *igi, struct ipcon_peer_node *self)
+static void ipcon_group_unreg_cleanup(struct ipcon_group_info *igi,
+				      struct ipcon_peer_node *self)
 {
 	struct ipcon_work *iw = NULL;
 	struct ipcon_kevent *ik;
@@ -618,10 +615,8 @@ static void ipcon_group_unreg_cleanup(struct ipcon_group_info *igi, struct ipcon
 		nc_getname(igi->nameid, ik->group.name);
 		nc_getname(self->nameid, ik->group.peer_name);
 
-		ipcon_dbg("Group %s.%s@%d removed.\n",
-				ik->group.peer_name,
-				ik->group.name,
-				igi->group);
+		ipcon_dbg("Group %s.%s@%d removed.\n", ik->group.peer_name,
+			  ik->group.name, igi->group);
 
 		queue_work(igi_kernel->mc_wq, &iw->work);
 	}
@@ -668,7 +663,6 @@ static int ipcon_grp_unreg(struct sk_buff *skb, struct ipcon_peer_node *self)
 	if (nameid < 0)
 		return nameid;
 
-
 	igi = ipn_lookup_byname(self, nameid);
 	/*
 	 * Isolate this group from peer, so that no new group message
@@ -711,7 +705,6 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct ipcon_peer_node *self)
 	char peer_name[IPCON_MAX_NAME_LEN];
 	char group_name[IPCON_MAX_NAME_LEN];
 
-
 	ipcon_dbg("enter.\n");
 	ret = ipconmsg_parse(skb, tb, IPCON_ATTR_MAX, ipcon_policy, NULL);
 	if (ret < 0)
@@ -736,11 +729,10 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct ipcon_peer_node *self)
 	}
 
 	do {
-
-		ipn_add_filter(self, IPCON_EVENT_GRP_ADD,
-				peer_nameid, group_nameid, GFP_KERNEL);
-		ipn_add_filter(self, IPCON_EVENT_GRP_REMOVE,
-				peer_nameid, group_nameid, GFP_KERNEL);
+		ipn_add_filter(self, IPCON_EVENT_GRP_ADD, peer_nameid,
+			       group_nameid, GFP_KERNEL);
+		ipn_add_filter(self, IPCON_EVENT_GRP_REMOVE, peer_nameid,
+			       group_nameid, GFP_KERNEL);
 
 		ipn = ipd_lookup_byname(ipcon_db, peer_nameid);
 		if (!ipn) {
@@ -761,7 +753,7 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct ipcon_peer_node *self)
 
 	if (ret == 0) {
 		do {
-			struct sk_buff	*msg = ipconmsg_new(GFP_KERNEL);
+			struct sk_buff *msg = ipconmsg_new(GFP_KERNEL);
 			void *p = NULL;
 
 			if (!msg) {
@@ -770,20 +762,18 @@ static int ipcon_grp_reslove(struct sk_buff *skb, struct ipcon_peer_node *self)
 			}
 
 			p = ipconmsg_put(msg, 0, ipconmsg_seq(skb),
-					IPCON_GRP_RESLOVE, 0);
+					 IPCON_GRP_RESLOVE, 0);
 
 			nla_put_u32(msg, IPCON_ATTR_GROUP, group);
 			ipconmsg_end(msg, p);
 			ret = ipcon_unicast(msg, ipconmsg_srcport(skb));
 
 		} while (0);
-
 	}
 
 	ipcon_dbg("%s exit(%d).\n", __func__, ret);
 	return ret;
 }
-
 
 /**
  * ipconmsg_unicast - unicast a netlink message
@@ -810,11 +800,11 @@ int ipcon_unicast(struct sk_buff *skb, __u32 port)
 	return ret;
 }
 
-
 int ipcon_multicast_filtered(struct sk_buff *skb, __u32 exclusive_port,
-	__u32 group, gfp_t flags,
-	int (*filter)(struct sock *dsk, struct sk_buff *skb, void *data),
-	void *filter_data)
+			     __u32 group, gfp_t flags,
+			     int (*filter)(struct sock *dsk,
+					   struct sk_buff *skb, void *data),
+			     void *filter_data)
 {
 	int ret = 0;
 
@@ -826,32 +816,28 @@ int ipcon_multicast_filtered(struct sk_buff *skb, __u32 exclusive_port,
 			break;
 		}
 
-                /* if no listener, just return as 0 */
-                if (!netlink_has_listeners(ipcon_nl_sock, group)) {
-                        ipcon_dbg("%s: No listener in group %d\n",
-                                __func__, group);
+		/* if no listener, just return as 0 */
+		if (!netlink_has_listeners(ipcon_nl_sock, group)) {
+			ipcon_dbg("%s: No listener in group %d\n", __func__,
+				  group);
 			consume_skb(skb);
-                        break;
-                }
+			break;
+		}
 
 		NETLINK_CB(skb).dst_group = group;
-		ret = netlink_broadcast_filtered(ipcon_nl_sock,
-                                skb,
-                                exclusive_port,
-                                group,
-                                flags,
-                                filter,
-                                filter_data);
+		ret = netlink_broadcast_filtered(ipcon_nl_sock, skb,
+						 exclusive_port, group, flags,
+						 filter, filter_data);
 	} while (0);
 
 	return ret >= 0 ? 0 : ret;
 }
 
-int ipcon_multicast(struct sk_buff *skb, __u32 exclusive_port,
-	__u32 group, gfp_t flags)
+int ipcon_multicast(struct sk_buff *skb, __u32 exclusive_port, __u32 group,
+		    gfp_t flags)
 {
-	return ipcon_multicast_filtered(skb, exclusive_port, group,
-			flags, NULL, NULL);
+	return ipcon_multicast_filtered(skb, exclusive_port, group, flags, NULL,
+					NULL);
 }
 
 /**
@@ -896,12 +882,12 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self)
 
 	do {
 		void *p = NULL;
-		struct sk_buff	*msg = NULL;
+		struct sk_buff *msg = NULL;
 
 		ipn = ipd_lookup_byname(ipcon_db, nameid);
 		if (!ipn) {
-			ipcon_err("%s: Peer %s not found.\n",
-				__func__, peer_name);
+			ipcon_err("%s: Peer %s not found.\n", __func__,
+				  peer_name);
 
 			ret = -ESRCH;
 			break;
@@ -909,7 +895,7 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self)
 		tport = ipn_rcvport(ipn);
 		if (tport == IPCON_INVALID_PORT) {
 			ipcon_err("%s: Peer %s does not have rcv I/F.\n",
-				__func__, peer_name);
+				  __func__, peer_name);
 			ret = -EPERM;
 		}
 
@@ -921,12 +907,11 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self)
 
 		p = ipconmsg_put(msg, 0, 0, IPCON_USR_MSG, 0);
 
-		nla_put(msg, IPCON_ATTR_DATA,
-			nla_len(tb[IPCON_ATTR_DATA]),
+		nla_put(msg, IPCON_ATTR_DATA, nla_len(tb[IPCON_ATTR_DATA]),
 			nla_data(tb[IPCON_ATTR_DATA]));
 
 		nla_put_string(msg, IPCON_ATTR_PEER_NAME,
-				nc_refname(self->nameid));
+			       nc_refname(self->nameid));
 
 		ipconmsg_end(msg, p);
 
@@ -948,7 +933,8 @@ static int ipcon_unicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self)
  *
  * Return: 0 on success, negative error code on failure
  */
-static int ipcon_multicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self)
+static int ipcon_multicast_msg(struct sk_buff *skb,
+			       struct ipcon_peer_node *self)
 {
 	int ret = 0;
 	struct ipcon_group_info *igi = NULL;
@@ -969,8 +955,7 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self
 		return -EINVAL;
 
 	if (tb[IPCON_ATTR_FLAG] &&
-		(nla_get_u32(tb[IPCON_ATTR_FLAG]) &
-		 IPCON_FLG_MULTICAST_SYNC))
+	    (nla_get_u32(tb[IPCON_ATTR_FLAG]) & IPCON_FLG_MULTICAST_SYNC))
 		sync = 1;
 
 	nla_strscpy(group_name, tb[IPCON_ATTR_GROUP_NAME], IPCON_MAX_NAME_LEN);
@@ -981,10 +966,9 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self
 	if (group_nameid < 0)
 		return group_nameid;
 
-
 	do {
 		void *p = NULL;
-		struct sk_buff	*msg = NULL;
+		struct sk_buff *msg = NULL;
 
 		peer_nameid = ipn_nameid(self);
 
@@ -1002,13 +986,12 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self
 
 		p = ipconmsg_put(msg, 0, 0, IPCON_MULTICAST_MSG, 0);
 		nla_put_string(msg, IPCON_ATTR_PEER_NAME,
-				nc_refname(peer_nameid));
+			       nc_refname(peer_nameid));
 
 		nla_put_string(msg, IPCON_ATTR_GROUP_NAME,
-				nc_refname(group_nameid));
+			       nc_refname(group_nameid));
 
-		nla_put(msg, IPCON_ATTR_DATA,
-			nla_len(tb[IPCON_ATTR_DATA]),
+		nla_put(msg, IPCON_ATTR_DATA, nla_len(tb[IPCON_ATTR_DATA]),
 			nla_data(tb[IPCON_ATTR_DATA]));
 
 		ipconmsg_end(msg, p);
@@ -1025,14 +1008,14 @@ static int ipcon_multicast_msg(struct sk_buff *skb, struct ipcon_peer_node *self
 		 */
 		if (sync) {
 			ret = ipcon_multicast(msg, ipn_rcvport(self),
-					igi->group, GFP_KERNEL);
+					      igi->group, GFP_KERNEL);
 
 		} else {
 			struct ipcon_multicast_worker_data *imwd;
 			struct ipcon_work *iw = NULL;
 
-			iw = iw_alloc(ipcon_multicast_worker,
-					sizeof(*imwd), GFP_ATOMIC);
+			iw = iw_alloc(ipcon_multicast_worker, sizeof(*imwd),
+				      GFP_ATOMIC);
 			if (!iw) {
 				ret = -ENOMEM;
 				break;
@@ -1102,7 +1085,6 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 
 	nla_strscpy(name, tb[IPCON_ATTR_PEER_NAME], IPCON_MAX_NAME_LEN);
 
-
 	nameid = nc_add(name, GFP_KERNEL);
 	if (nameid < 0)
 		return nameid;
@@ -1118,15 +1100,9 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 			break;
 		}
 
-		self = ipn_alloc(ipconmsg_srcport(skb),
-				snd_port,
-				rcv_port,
-				nameid,
-				commid,
-				current->pid,
-				peer_type,
-				ipn_flag,
-				GFP_KERNEL);
+		self = ipn_alloc(ipconmsg_srcport(skb), snd_port, rcv_port,
+				 nameid, commid, current->pid, peer_type,
+				 ipn_flag, GFP_KERNEL);
 
 		if (!self) {
 			nc_id_put(nameid);
@@ -1147,10 +1123,8 @@ static int ipcon_peer_reg(struct sk_buff *skb, struct ipcon_peer_node *self)
 	} while (0);
 
 	if (!ret) {
-		iw = iw_alloc(ipcon_kevent_worker,
-				sizeof(*ik), GFP_ATOMIC);
+		iw = iw_alloc(ipcon_kevent_worker, sizeof(*ik), GFP_ATOMIC);
 		if (iw) {
-
 			ik = iw->data;
 			ik->type = IPCON_EVENT_PEER_ADD;
 			nc_getname(self->nameid, ik->peer.name);
@@ -1196,16 +1170,14 @@ static int ipcon_kernel_init(void)
 			break;
 		}
 
-		kgroup_nameid = nc_add(IPCON_KERNEL_GROUP_NAME,
-				GFP_KERNEL);
+		kgroup_nameid = nc_add(IPCON_KERNEL_GROUP_NAME, GFP_KERNEL);
 		if (kgroup_nameid < 0) {
 			ret = kgroup_nameid;
 			break;
 		}
 
-
 		igi_kernel = igi_alloc(kgroup_nameid, IPCON_KERNEL_GROUP,
-				GFP_KERNEL);
+				       GFP_KERNEL);
 		if (!igi_kernel) {
 			ret = -ENOMEM;
 			break;
@@ -1217,11 +1189,9 @@ static int ipcon_kernel_init(void)
 			break;
 		}
 
-		ipn_kernel = ipn_alloc(0, 0, 0, kpeer_nameid,
-				commid, current->pid,
-				PEER_TYPE_NORMAL,
-				0,
-				GFP_KERNEL);
+		ipn_kernel = ipn_alloc(0, 0, 0, kpeer_nameid, commid,
+				       current->pid, PEER_TYPE_NORMAL, 0,
+				       GFP_KERNEL);
 		if (!ipn_kernel) {
 			nc_id_put(commid);
 			ret = -ENOMEM;
@@ -1273,7 +1243,7 @@ static void ipcon_kernel_destroy(void)
 }
 
 static int ipcon_rcv(struct sk_buff *skb, struct nlmsghdr *nlh,
-		struct netlink_ext_ack *ack)
+		     struct netlink_ext_ack *ack)
 {
 	int ret = 0;
 	int type = nlh->nlmsg_type;
@@ -1351,7 +1321,6 @@ static int ipcon_rcv(struct sk_buff *skb, struct nlmsghdr *nlh,
 	default:
 		ipcon_err("Unknow msg type: %x\n", type);
 		ret = -EINVAL;
-
 	};
 
 	return ret;
@@ -1396,12 +1365,13 @@ int ipcon_nl_init(void)
 
 	do {
 		struct netlink_kernel_cfg cfg = {
-			.input  = ipcon_nl_rcv_msg,
-			.groups	= IPCON_MAX_GROUP,
-			.flags	= NL_CFG_F_NONROOT_RECV | NL_CFG_F_NONROOT_SEND	,
+			.input = ipcon_nl_rcv_msg,
+			.groups = IPCON_MAX_GROUP,
+			.flags = NL_CFG_F_NONROOT_RECV | NL_CFG_F_NONROOT_SEND,
 		};
 
-		ipcon_nl_sock = netlink_kernel_create(&init_net, NETLINK_IPCON, &cfg);
+		ipcon_nl_sock =
+			netlink_kernel_create(&init_net, NETLINK_IPCON, &cfg);
 		if (!ipcon_nl_sock) {
 			ipcon_err("Failed to create netlink socket.\n");
 			ret = -ENOMEM;
@@ -1416,7 +1386,8 @@ int ipcon_nl_init(void)
 
 		ret = netlink_register_notifier(&ipcon_netlink_notifier);
 		if (ret) {
-			ipcon_err("Failed to register ipcon netlink notifier.\n");
+			ipcon_err(
+				"Failed to register ipcon netlink notifier.\n");
 			ipcon_kernel_destroy();
 			break;
 		}
@@ -1468,15 +1439,9 @@ void *kernel_ipcon_reg_peer(char *name)
 		if (commid < 0)
 			break;
 
-		ipn = ipn_alloc(IPCON_INVALID_PORT,
-			IPCON_INVALID_PORT,
-			IPCON_INVALID_PORT,
-			nameid,
-			commid,
-			current->pid,
-			PEER_TYPE_KERNEL,
-			0,
-			GFP_KERNEL);
+		ipn = ipn_alloc(IPCON_INVALID_PORT, IPCON_INVALID_PORT,
+				IPCON_INVALID_PORT, nameid, commid,
+				current->pid, PEER_TYPE_KERNEL, 0, GFP_KERNEL);
 
 		ret = ipd_insert(ipcon_db, ipn);
 		if (ret < 0)
@@ -1486,8 +1451,8 @@ void *kernel_ipcon_reg_peer(char *name)
 			struct ipcon_work *iw = NULL;
 			struct ipcon_kevent *ik;
 
-			iw = iw_alloc(ipcon_kevent_worker,
-				sizeof(*ik), GFP_ATOMIC);
+			iw = iw_alloc(ipcon_kevent_worker, sizeof(*ik),
+				      GFP_ATOMIC);
 			if (iw) {
 				ik = iw->data;
 
@@ -1581,14 +1546,12 @@ int kernel_ipcon_unreg_peer(void *handler)
 		module_put(THIS_MODULE);
 
 		if (!hash_empty(ipn->ipn_group_ht)) {
-			hash_for_each_safe(ipn->ipn_group_ht, bkt, tmp,
-					igi, igi_hgroup) {
-
+			hash_for_each_safe(ipn->ipn_group_ht, bkt, tmp, igi,
+					   igi_hgroup) {
 				igi_del(igi);
 				ipcon_group_unreg_cleanup(igi, ipn);
 			}
 		}
-
 
 		iw_mc = iw_alloc(ipcon_kevent_worker, sizeof(*ik), GFP_KERNEL);
 		if (iw_mc) {
@@ -1632,7 +1595,6 @@ int kernel_ipcon_reg_group(void *handler, char *group)
 
 		if (!valid_kernel_ipcon_peer(handler))
 			break;
-
 
 		group_nameid = nc_add(group, GFP_KERNEL);
 		if (group_nameid < 0)
@@ -1714,8 +1676,8 @@ EXPORT_SYMBOL(kernel_ipcon_unreg_group);
  *
  * Return: 0 on success, negative error code on failure
  */
-int kernel_ipcon_multicast_msg(void *handler, char *group_name,
-			char *buf, int len, int sync)
+int kernel_ipcon_multicast_msg(void *handler, char *group_name, char *buf,
+			       int len, int sync)
 {
 	int ret = 0;
 	int group_nameid = 0;
@@ -1723,7 +1685,7 @@ int kernel_ipcon_multicast_msg(void *handler, char *group_name,
 	do {
 		struct ipcon_peer_node *ipn = handler;
 		struct ipcon_group_info *igi = NULL;
-		struct sk_buff	*msg = NULL;
+		struct sk_buff *msg = NULL;
 		void *p = NULL;
 
 		if (!valid_kernel_ipcon_peer(handler)) {
@@ -1761,10 +1723,10 @@ int kernel_ipcon_multicast_msg(void *handler, char *group_name,
 
 		p = ipconmsg_put(msg, 0, 0, IPCON_MULTICAST_MSG, 0);
 		nla_put_string(msg, IPCON_ATTR_PEER_NAME,
-				nc_refname(ipn_nameid(ipn)));
+			       nc_refname(ipn_nameid(ipn)));
 
 		nla_put_string(msg, IPCON_ATTR_GROUP_NAME,
-				nc_refname(group_nameid));
+			       nc_refname(group_nameid));
 		nla_put(msg, IPCON_ATTR_DATA, len, buf);
 		ipconmsg_end(msg, p);
 
@@ -1774,8 +1736,8 @@ int kernel_ipcon_multicast_msg(void *handler, char *group_name,
 			struct ipcon_multicast_worker_data *imwd;
 			struct ipcon_work *iw = NULL;
 
-			iw = iw_alloc(ipcon_multicast_worker,
-					sizeof(*imwd), GFP_ATOMIC);
+			iw = iw_alloc(ipcon_multicast_worker, sizeof(*imwd),
+				      GFP_ATOMIC);
 			if (!iw) {
 				ret = -ENOMEM;
 				break;
