@@ -478,6 +478,106 @@ CONFIG_INIT=y"""
         if install_dir.exists():
             subprocess.run(["cp", "-a", f"{install_dir}/.", str(self.rootfs_dir)], check=True)
             logger.info("Copied BusyBox installation to rootfs")
+
+        # Build test programs first
+        test_src_dir = Path(__file__).parent
+        logger.info("Building test programs...")
+        try:
+            subprocess.run(["make", "-C", str(test_src_dir), "clean"], check=True)
+            subprocess.run(["make", "-C", str(test_src_dir)], check=True)
+            logger.info("Test programs built successfully")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to build test programs: {e}")
+            raise RuntimeError("Test program compilation failed") from e
+
+        # Copy test binaries and their libraries to rootfs
+        test_bin_dir = test_src_dir / "bin"
+        usr_bin_dir = self.rootfs_dir / "usr" / "bin"
+        lib_dir = self.rootfs_dir / "lib"
+        lib64_dir = self.rootfs_dir / "lib64"
+        
+        usr_bin_dir.mkdir(parents=True, exist_ok=True)
+        lib_dir.mkdir(exist_ok=True)
+        lib64_dir.mkdir(exist_ok=True)
+
+        # Create test runner script
+        test_runner = usr_bin_dir / "run_ipcon_test.sh"
+        test_runner.write_text("""#!/bin/sh
+
+echo "=== Starting IPCON Test Suite ==="
+echo "Found test binaries:"
+ls /usr/bin/test_* | sed 's|/usr/bin/||'
+
+total_tests=0
+passed_tests=0
+failed_tests=0
+
+for test_bin in /usr/bin/test_*; do
+    if [ -x "$test_bin" ]; then
+        echo 
+        echo "=== Running $test_bin ==="
+        total_tests=$((total_tests + 1))
+        if "$test_bin"; then
+            echo "✓ PASSED: $test_bin"
+            passed_tests=$((passed_tests + 1))
+        else
+            echo "✗ FAILED: $test_bin (exit code $?)"
+            failed_tests=$((failed_tests + 1))
+        fi
+    fi
+done
+
+echo 
+echo "=== Test Summary ==="
+echo "Total:  $total_tests"
+echo "Passed: $passed_tests"
+echo "Failed: $failed_tests"
+
+if [ "$failed_tests" -gt 0 ]; then
+    echo 
+    echo "WARNING: Some tests failed!"
+    exit 1
+else
+    echo 
+    echo "All tests passed successfully!"
+    exit 0
+fi
+""")
+        test_runner.chmod(0o755)
+        logger.info("Created test runner script: /usr/bin/run_ipcon_test.sh")
+        
+        if test_bin_dir.exists():
+            for binary in test_bin_dir.glob("*"):
+                if binary.is_file() and binary.suffix != ".c":  # Skip source files
+                    # Copy binary
+                    dest_binary = usr_bin_dir / binary.name
+                    shutil.copy2(binary, dest_binary)
+                    dest_binary.chmod(0o755)
+                    logger.info(f"Copied test binary: {binary.name} -> {usr_bin_dir}")
+                    
+                    # Find and copy required libraries
+                    try:
+                        # First copy the dynamic linker explicitly
+                        ld_linux_path = Path("/lib64/ld-linux-x86-64.so.2")
+                        if ld_linux_path.exists():
+                            shutil.copy2(ld_linux_path, lib64_dir / ld_linux_path.name)
+                            logger.info(f"Copied dynamic linker: {ld_linux_path.name} -> {lib64_dir}")
+
+                        # Then get other dependencies via ldd
+                        result = subprocess.run(["ldd", str(binary)], 
+                                             capture_output=True, text=True)
+                        if result.returncode == 0:
+                            for line in result.stdout.splitlines():
+                                if "=>" in line:  # Dynamic library
+                                    lib_path = line.split("=>")[1].split("(")[0].strip()
+                                    if lib_path and os.path.exists(lib_path):
+                                        lib_name = os.path.basename(lib_path)
+                                        # Determine lib or lib64 based on path
+                                        dest_dir = lib64_dir if "lib64" in lib_path else lib_dir
+                                        shutil.copy2(lib_path, dest_dir / lib_name)
+                                        logger.info(f"Copied library: {lib_name} -> {dest_dir}")
+                    except Exception as e:
+                        logger.warning(f"Could not determine libraries for {binary.name}: {e}")
         
         # Create essential directories and files
         self._setup_rootfs()
