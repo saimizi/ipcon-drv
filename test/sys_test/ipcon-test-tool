@@ -1,0 +1,971 @@
+#!/usr/bin/env python3
+"""
+IPCON Driver Test Tool
+
+A comprehensive tool for building and testing the IPCON kernel driver.
+This tool handles kernel compilation with IPCON built-in, minimal rootfs
+creation with busybox, and QEMU virtual machine setup.
+"""
+
+import os
+import sys
+import argparse
+import subprocess
+import shutil
+import tempfile
+import urllib.request
+import tarfile
+import gzip
+from pathlib import Path
+import json
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+class IPCONTestTool:
+    def __init__(self):
+        self.work_dir = Path.cwd() / "ipcon-test-build"
+        self.kernel_dir = self.work_dir / "linux"
+        self.busybox_dir = self.work_dir / "busybox"
+        self.rootfs_dir = self.work_dir / "rootfs"
+        self.output_dir = self.work_dir / "output"
+        
+        # Default versions - using older stable versions to avoid config issues
+        self.default_kernel_version = "6.6.65"  # Latest stable LTS
+        self.default_busybox_version = "1.35.0"  # Older stable version with proven compatibility
+        
+        # Ensure work directory exists
+        self.work_dir.mkdir(exist_ok=True)
+        self.output_dir.mkdir(exist_ok=True)
+
+    def get_latest_stable_kernel(self):
+        """Get the latest stable kernel version from kernel.org"""
+        try:
+            with urllib.request.urlopen("https://www.kernel.org/releases.json") as response:
+                data = json.loads(response.read())
+                for release in data['releases']:
+                    if release['moniker'] == 'stable':
+                        return release['version']
+            return self.default_kernel_version
+        except Exception as e:
+            logger.warning(f"Failed to get latest kernel version: {e}")
+            return self.default_kernel_version
+
+    def _get_download_path(self, url):
+        """Get local download path in $HOME/Downloads"""
+        downloads_dir = Path.home() / "Downloads"
+        downloads_dir.mkdir(exist_ok=True)
+        return downloads_dir / url.split("/")[-1]
+
+    def download_and_extract(self, url, dest_dir, strip_components=1):
+        """Download and extract a tarball with $HOME/Downloads handling"""
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        local_path = self._get_download_path(url)
+        
+        # Use existing download if available
+        if not local_path.exists():
+            try:
+                logger.info(f"Downloading {url} to {local_path}")
+                urllib.request.urlretrieve(url, local_path)
+            except Exception as e:
+                if local_path.exists():
+                    local_path.unlink()  # Clean up partial download
+                raise RuntimeError(f"Download failed: {e}") from e
+        else:
+            logger.info(f"Using existing download: {local_path}")
+            
+        logger.info(f"Extracting to {dest_dir}")
+        with tarfile.open(local_path, 'r:*') as tar:
+            # Extract with strip-components equivalent
+            members = tar.getmembers()
+            if strip_components > 0:
+                for member in members:
+                    parts = member.name.split('/')
+                    if len(parts) > strip_components:
+                        member.name = '/'.join(parts[strip_components:])
+                        if member.name:  # Skip empty names
+                            tar.extract(member, dest_dir)
+            else:
+                tar.extractall(dest_dir)
+        
+        # Keep downloaded file in $HOME/Downloads
+
+    def build_kernel(self, version=None, config_only=False):
+        """Build Linux kernel with IPCON driver built-in"""
+        if version is None:
+            version = self.get_latest_stable_kernel()
+            
+        logger.info(f"Building kernel version {version}")
+        
+        # Download kernel if not exists
+        if not self.kernel_dir.exists() or not (self.kernel_dir / "Makefile").exists():
+            kernel_url = f"https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz"
+            self.download_and_extract(kernel_url, self.kernel_dir)
+        
+        # Copy IPCON driver to kernel tree
+        ipcon_dest = self.kernel_dir / "net" / "netlink" / "ipcon"
+        ipcon_dest.mkdir(parents=True, exist_ok=True)
+        
+        # Copy all IPCON source files
+        ipcon_files = [
+            "main.c", "ipcon_nl.c", "ipcon_msg.c", "ipcon_db.c", 
+            "name_cache.c", "ipcon_debugfs.c", "Makefile", "Kconfig"
+        ]
+        ipcon_headers = [
+            "ipcon.h", "ipcon_nl.h", "ipcon_msg.h", "ipcon_db.h",
+            "name_cache.h", "ipcon_debugfs.h", "ipcon_dbg.h"
+        ]
+        
+        for file in ipcon_files + ipcon_headers:
+            src = Path.cwd() / file
+            if src.exists():
+                shutil.copy2(src, ipcon_dest / file)
+        
+        # Apply kernel patches
+        patch_file = Path.cwd() / "doc" / "patches" / "0001-Add-ipcon-driver-to-kernel-build.patch"
+        if patch_file.exists():
+            logger.info("Applying IPCON kernel patch")
+            subprocess.run(["patch", "-p1", "-d", str(self.kernel_dir)], 
+                         stdin=open(patch_file), check=True)
+        
+        # Generate minimal kernel config for IPCON
+        config_content = self._generate_kernel_config()
+        config_file = self.kernel_dir / ".config"
+        config_file.write_text(config_content)
+        
+        if config_only:
+            logger.info("Kernel configuration completed")
+            return
+        
+        # Build kernel
+        logger.info("Building kernel...")
+        env = os.environ.copy()
+        env['ARCH'] = 'x86_64'
+        
+        subprocess.run(["make", "olddefconfig"], cwd=self.kernel_dir, env=env, check=True)
+        subprocess.run(["make", "-j", str(os.cpu_count() or 4)], 
+                      cwd=self.kernel_dir, env=env, check=True)
+        
+        # Copy kernel image
+        kernel_image = self.kernel_dir / "arch" / "x86" / "boot" / "bzImage"
+        output_kernel = self.output_dir / f"vmlinuz-{version}"
+        shutil.copy2(kernel_image, output_kernel)
+        
+        logger.info(f"Kernel built successfully: {output_kernel}")
+
+    def _generate_kernel_config(self):
+        """Generate minimal kernel configuration for IPCON driver"""
+        return """# Minimal kernel config for IPCON driver testing
+CONFIG_64BIT=y
+CONFIG_X86_64=y
+CONFIG_SMP=y
+CONFIG_SYSVIPC=y
+CONFIG_POSIX_MQUEUE=y
+CONFIG_CROSS_MEMORY_ATTACH=y
+CONFIG_USELIB=y
+CONFIG_AUDIT=y
+CONFIG_HAVE_ARCH_AUDITSYSCALL=y
+CONFIG_AUDITSYSCALL=y
+CONFIG_IRQ_WORK=y
+CONFIG_BUILDTIME_EXTABLE_SORT=y
+CONFIG_THREAD_INFO_IN_TASK=y
+
+# Basic system features
+CONFIG_IKCONFIG=y
+CONFIG_IKCONFIG_PROC=y
+CONFIG_LOG_BUF_SHIFT=17
+CONFIG_LOG_CPU_MAX_BUF_SHIFT=12
+CONFIG_PRINTK_SAFE_LOG_BUF_SHIFT=13
+CONFIG_GENERIC_SCHED_CLOCK=y
+CONFIG_ARCH_CLOCKSOURCE_INIT=y
+CONFIG_GENERIC_CLOCKEVENTS=y
+CONFIG_GENERIC_CLOCKEVENTS_BROADCAST=y
+CONFIG_GENERIC_CLOCKEVENTS_MIN_ADJUST=y
+CONFIG_GENERIC_CMOS_UPDATE=y
+
+# Networking - Required for IPCON
+CONFIG_NET=y
+CONFIG_PACKET=y
+CONFIG_UNIX=y
+CONFIG_INET=y
+CONFIG_IP_MULTICAST=y
+CONFIG_NET_IPIP=y
+CONFIG_SYN_COOKIES=y
+CONFIG_INET_TUNNEL=y
+CONFIG_INET_DIAG=y
+CONFIG_INET_TCP_DIAG=y
+CONFIG_INET_UDP_DIAG=y
+CONFIG_INET_RAW_DIAG=y
+CONFIG_INET_DIAG_DESTROY=y
+
+# Netlink - IPCON dependency
+CONFIG_NETLINK_DIAG=y
+
+# IPCON Driver - Main requirement
+CONFIG_IPCON=y
+
+# Debugging support
+CONFIG_DEBUG_FS=y
+CONFIG_DEBUG_KERNEL=y
+CONFIG_DYNAMIC_DEBUG=y
+
+# File systems
+CONFIG_EXT4_FS=y
+CONFIG_EXT4_FS_POSIX_ACL=y
+CONFIG_EXT4_FS_SECURITY=y
+CONFIG_JBD2=y
+CONFIG_FS_MBCACHE=y
+CONFIG_TMPFS=y
+CONFIG_TMPFS_POSIX_ACL=y
+CONFIG_PROC_FS=y
+CONFIG_PROC_SYSCTL=y
+CONFIG_SYSFS=y
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+
+# Essential drivers
+CONFIG_TTY=y
+CONFIG_SERIAL_8250=y
+CONFIG_SERIAL_8250_CONSOLE=y
+CONFIG_SERIAL_CORE=y
+CONFIG_SERIAL_CORE_CONSOLE=y
+CONFIG_CONSOLE_TRANSLATIONS=y
+CONFIG_VT=y
+CONFIG_VT_CONSOLE=y
+CONFIG_VT_HW_CONSOLE_BINDING=y
+CONFIG_UNIX98_PTYS=y
+CONFIG_LEGACY_PTYS=y
+CONFIG_LEGACY_PTY_COUNT=256
+
+# Block devices
+CONFIG_BLOCK=y
+CONFIG_BLK_DEV_INITRD=y
+
+# Architecture specific
+CONFIG_X86=y
+CONFIG_INSTRUCTION_DECODER=y
+CONFIG_OUTPUT_FORMAT="elf64-x86-64"
+CONFIG_ARCH_DEFCONFIG="arch/x86/configs/x86_64_defconfig"
+CONFIG_LOCKDEP_SUPPORT=y
+CONFIG_STACKTRACE_SUPPORT=y
+CONFIG_MMU=y
+CONFIG_ARCH_MMAP_RND_BITS_MIN=28
+CONFIG_ARCH_MMAP_RND_BITS_MAX=32
+CONFIG_ARCH_MMAP_RND_COMPAT_BITS_MIN=8
+CONFIG_ARCH_MMAP_RND_COMPAT_BITS_MAX=16
+
+# Memory management
+CONFIG_FLATMEM=y
+CONFIG_FLAT_NODE_MEM_MAP=y
+CONFIG_SPARSEMEM_STATIC=y
+CONFIG_HAVE_MEMBLOCK=y
+CONFIG_HAVE_MEMBLOCK_NODE_MAP=y
+CONFIG_ARCH_DISCARD_MEMBLOCK=y
+CONFIG_SPLIT_PTLOCK_CPUS=4
+CONFIG_COMPACTION=y
+CONFIG_MIGRATION=y
+CONFIG_PHYS_ADDR_T_64BIT=y
+CONFIG_ZONE_DMA32=y
+CONFIG_BOUNCE=y
+CONFIG_VIRT_TO_BUS=y
+CONFIG_MMU_NOTIFIER=y
+CONFIG_KSM=y
+CONFIG_DEFAULT_MMAP_MIN_ADDR=4096
+CONFIG_TRANSPARENT_HUGEPAGE=y
+CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS=y
+CONFIG_CROSS_MEMORY_ATTACH=y
+CONFIG_CLEANCACHE=y
+
+# Basic init
+CONFIG_INIT_ENV_ARG_LIMIT=32
+CONFIG_CROSS_COMPILE=""
+CONFIG_LOCALVERSION=""
+CONFIG_SWAP=y
+CONFIG_SYSVIPC=y
+CONFIG_SYSVIPC_SYSCTL=y
+CONFIG_POSIX_MQUEUE=y
+CONFIG_POSIX_MQUEUE_SYSCTL=y
+CONFIG_FHANDLE=y
+CONFIG_USELIB=y
+
+# Process/task features
+CONFIG_TASK_DELAY_ACCT=y
+CONFIG_TASK_XACCT=y
+CONFIG_TASK_IO_ACCOUNTING=y
+CONFIG_PSI=y
+CONFIG_PSI_DEFAULT_DISABLED=y
+
+# Essential for boot
+CONFIG_BINFMT_ELF=y
+CONFIG_BINFMT_SCRIPT=y
+CONFIG_COREDUMP=y
+
+# RCU
+CONFIG_PREEMPT_NONE=y
+CONFIG_PREEMPT_RCU=y
+CONFIG_RCU_STALL_COMMON=y
+CONFIG_TREE_RCU=y
+CONFIG_RCU_FANOUT=64
+CONFIG_RCU_FANOUT_LEAF=16
+CONFIG_RCU_FAST_NO_HZ=y
+CONFIG_RCU_BOOST=y
+CONFIG_RCU_BOOST_DELAY=500
+CONFIG_RCU_KTHREAD_PRIO=1
+
+# Mandatory for basic functionality
+CONFIG_SCHED_DEBUG=y
+CONFIG_SCHEDSTATS=y
+"""
+
+    def build_rootfs(self, version=None):
+        """Build minimal rootfs with busybox"""
+        if version is None:
+            version = self.default_busybox_version
+        
+        logger.info(f"Building rootfs with busybox {version}")
+        
+        # Download busybox if not exists
+        if not self.busybox_dir.exists() or not (self.busybox_dir / "Makefile").exists():
+            busybox_url = f"https://busybox.net/downloads/busybox-{version}.tar.bz2"
+            self.download_and_extract(busybox_url, self.busybox_dir)
+        
+        # Load or generate BusyBox config
+        config_content = self._load_busybox_config()
+        config_file = self.busybox_dir / ".config"
+        config_file.write_text(config_content)
+        
+        logger.info("Validating BusyBox configuration...")
+        
+        # Build busybox
+        logger.info("Building busybox...")
+        
+        # Use the simplest possible busybox configuration approach
+        try:
+            logger.info("Configuring busybox with simplified approach...")
+            
+            # Force non-interactive mode from the start
+            env = os.environ.copy()
+            env['DEBIAN_FRONTEND'] = 'noninteractive'
+            env['KCONFIG_NOTIMESTAMP'] = '1'
+            env['KCONFIG_OVERWRITECONFIG'] = '1'
+            env['KCONFIG_NOSILENTUPDATE'] = '1'
+            
+            # Important: Disable problematic features that cause compilation issues
+            config_file = self.busybox_dir / ".config"
+            if config_file.exists():
+                logger.info("Disabling problematic features that cause build issues...")
+                config_content = config_file.read_text()
+                
+                # Disable traffic control (tc) which causes CBQ compilation errors
+                if "CONFIG_TC=y" in config_content:
+                    config_content = config_content.replace("CONFIG_TC=y", "# CONFIG_TC is not set")
+                    logger.info("Disabled CONFIG_TC to fix CBQ compilation errors")
+                elif "# CONFIG_TC is not set" not in config_content:
+                    config_content += "\n# CONFIG_TC is not set\n"
+                    logger.info("Added CONFIG_TC disable to fix CBQ compilation errors")
+
+                # Validate CONFIG_STATIC=y is present
+                if "CONFIG_STATIC=y" not in config_content:
+                    logger.error("BusyBox config must have CONFIG_STATIC=y")
+                    raise ValueError("CONFIG_STATIC not enabled in BusyBox config")
+                
+                config_file.write_text(config_content)
+                
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Busybox configuration failed: {e}")
+            raise
+            
+        # Build busybox with simplified approach
+        logger.info("Compiling busybox...")
+        try:
+            # Set environment variables to avoid interactive prompts
+            env = os.environ.copy()
+            env['DEBIAN_FRONTEND'] = 'noninteractive'
+            env['KCONFIG_NOTIMESTAMP'] = '1'
+            env['KCONFIG_OVERWRITECONFIG'] = '1'
+            
+            # Build with timeout but handle prompts
+            logger.info("Building busybox...")
+            
+            # Use a more robust approach with expect-style behavior
+            cmd = f"timeout 600 bash -c 'yes \"\" | make -j{os.cpu_count() or 2}'"
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                cwd=self.busybox_dir, 
+                env=env,
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode != 0:
+                # Log the actual error
+                logger.error(f"Build stdout: {result.stdout}")
+                logger.error(f"Build stderr: {result.stderr}")
+                raise subprocess.CalledProcessError(result.returncode, "make", result.stderr)
+            logger.info("Busybox compilation successful")
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Busybox compilation failed: {e}")
+            if hasattr(e, 'stderr') and e.stderr:
+                logger.error(f"Compilation stderr: {e.stderr}")
+                
+            logger.info("Trying with ultra-minimal configuration to avoid build issues...")
+            
+            # Use absolute minimal configuration that should compile anywhere
+            ultra_minimal_config = """CONFIG_HAVE_DOT_CONFIG=y
+CONFIG_BUSYBOX=y
+CONFIG_STATIC=y
+CONFIG_INSTALL_APPLET_SYMLINKS=y
+CONFIG_PREFIX="./_install"
+# Only the most basic tools
+CONFIG_CAT=y
+CONFIG_ECHO=y
+CONFIG_LS=y
+CONFIG_MKDIR=y
+CONFIG_MOUNT=y
+CONFIG_DMESG=y
+CONFIG_POWEROFF=y
+CONFIG_ASH=y
+CONFIG_INIT=y"""
+            
+            config_file.write_text(ultra_minimal_config)
+            
+            # Clean and reconfigure
+            logger.info("Cleaning previous build artifacts...")
+            subprocess.run(["make", "clean"], cwd=self.busybox_dir, 
+                         capture_output=True, check=False)
+            
+            # Skip oldconfig, just build with the config we wrote using yes command
+            logger.info("Building with ultra-minimal configuration...")
+            try:
+                env = os.environ.copy()
+                env['KCONFIG_NOTIMESTAMP'] = '1'
+                env['KCONFIG_OVERWRITECONFIG'] = '1'
+                
+                result = subprocess.run(
+                    f"yes 'n' | make -j{os.cpu_count() or 4}", 
+                    shell=True,
+                    cwd=self.busybox_dir, 
+                    env=env,
+                    timeout=300,
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                logger.info("Ultra-minimal build successful")
+            except subprocess.CalledProcessError as final_e:
+                logger.error(f"Even ultra-minimal build failed: {final_e}")
+                logger.error("This might indicate a serious system configuration issue")
+                logger.error("Please check that you have:")
+                logger.error("1. Complete build tools installed (build-essential)")  
+                logger.error("2. Kernel headers available")
+                logger.error("3. Sufficient disk space")
+                raise
+            
+        # Install busybox
+        logger.info("Installing busybox to rootfs...")
+        # Create rootfs directory structure first
+        self.rootfs_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Install busybox to its _install directory
+        subprocess.run(["make", "install"], cwd=self.busybox_dir, check=True)
+        
+        # Copy the installed files from _install to rootfs
+        install_dir = self.busybox_dir / "_install"
+        if install_dir.exists():
+            subprocess.run(["cp", "-a", f"{install_dir}/.", str(self.rootfs_dir)], check=True)
+            logger.info("Copied BusyBox installation to rootfs")
+
+        # Build test programs first
+        test_src_dir = Path(__file__).parent
+        logger.info("Building test programs...")
+        try:
+            subprocess.run(["make", "-C", str(test_src_dir), "clean"], check=True)
+            subprocess.run(["make", "-C", str(test_src_dir)], check=True)
+            logger.info("Test programs built successfully")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to build test programs: {e}")
+            raise RuntimeError("Test program compilation failed") from e
+
+        # Copy test binaries and their libraries to rootfs
+        test_bin_dir = test_src_dir / "bin"
+        usr_bin_dir = self.rootfs_dir / "usr" / "bin"
+        lib_dir = self.rootfs_dir / "lib"
+        lib64_dir = self.rootfs_dir / "lib64"
+        
+        usr_bin_dir.mkdir(parents=True, exist_ok=True)
+        lib_dir.mkdir(exist_ok=True)
+        lib64_dir.mkdir(exist_ok=True)
+
+        # Create test runner script
+        test_runner = usr_bin_dir / "run_ipcon_test.sh"
+        test_runner.write_text("""#!/bin/sh
+
+echo "=== Starting IPCON Test Suite ==="
+echo "Found test binaries:"
+ls /usr/bin/test_* | sed 's|/usr/bin/||'
+
+total_tests=0
+passed_tests=0
+failed_tests=0
+
+for test_bin in /usr/bin/test_*; do
+    if [ -x "$test_bin" ]; then
+        echo 
+        echo "=== Running $test_bin ==="
+        total_tests=$((total_tests + 1))
+        if "$test_bin"; then
+            echo "✓ PASSED: $test_bin"
+            passed_tests=$((passed_tests + 1))
+        else
+            echo "✗ FAILED: $test_bin (exit code $?)"
+            failed_tests=$((failed_tests + 1))
+        fi
+    fi
+done
+
+echo 
+echo "=== Test Summary ==="
+echo "Total:  $total_tests"
+echo "Passed: $passed_tests"
+echo "Failed: $failed_tests"
+
+if [ "$failed_tests" -gt 0 ]; then
+    echo 
+    echo "WARNING: Some tests failed!"
+    exit 1
+else
+    echo 
+    echo "All tests passed successfully!"
+    exit 0
+fi
+""")
+        test_runner.chmod(0o755)
+        logger.info("Created test runner script: /usr/bin/run_ipcon_test.sh")
+        
+        if test_bin_dir.exists():
+            for binary in test_bin_dir.glob("*"):
+                if binary.is_file() and binary.suffix != ".c":  # Skip source files
+                    # Copy binary
+                    dest_binary = usr_bin_dir / binary.name
+                    shutil.copy2(binary, dest_binary)
+                    dest_binary.chmod(0o755)
+                    logger.info(f"Copied test binary: {binary.name} -> {usr_bin_dir}")
+                    
+                    # Find and copy required libraries
+                    try:
+                        # First copy the dynamic linker explicitly
+                        ld_linux_path = Path("/lib64/ld-linux-x86-64.so.2")
+                        if ld_linux_path.exists():
+                            shutil.copy2(ld_linux_path, lib64_dir / ld_linux_path.name)
+                            logger.info(f"Copied dynamic linker: {ld_linux_path.name} -> {lib64_dir}")
+
+                        # Then get other dependencies via ldd
+                        result = subprocess.run(["ldd", str(binary)], 
+                                             capture_output=True, text=True)
+                        if result.returncode == 0:
+                            for line in result.stdout.splitlines():
+                                if "=>" in line:  # Dynamic library
+                                    lib_path = line.split("=>")[1].split("(")[0].strip()
+                                    if lib_path and os.path.exists(lib_path):
+                                        lib_name = os.path.basename(lib_path)
+                                        # Determine lib or lib64 based on path
+                                        dest_dir = lib64_dir if "lib64" in lib_path else lib_dir
+                                        shutil.copy2(lib_path, dest_dir / lib_name)
+                                        logger.info(f"Copied library: {lib_name} -> {dest_dir}")
+                    except Exception as e:
+                        logger.warning(f"Could not determine libraries for {binary.name}: {e}")
+        
+        # Create essential directories and files
+        self._setup_rootfs()
+        
+        # Create initramfs
+        initramfs_path = self.output_dir / "initramfs.cpio.gz"
+        self._create_initramfs(initramfs_path)
+        
+        logger.info(f"Rootfs built successfully: {initramfs_path}")
+
+    def _load_busybox_config(self):
+        """Load BusyBox config from file or generate from defconfig with CONFIG_STATIC=y"""
+        config_path = Path(__file__).parent / "busybox.config"
+        
+        # Use existing config if present
+        if config_path.exists():
+            logger.info(f"Using existing BusyBox config: {config_path}")
+            config = config_path.read_text()
+        else:
+            logger.info("Generating BusyBox config from defconfig")
+            try:
+                # Generate defconfig
+                subprocess.run(["make", "defconfig"], 
+                             cwd=self.busybox_dir, check=True)
+                
+                # Read generated config
+                config_content = (self.busybox_dir / ".config").read_text()
+                
+                # Force CONFIG_STATIC=y
+                config_content = config_content.replace("CONFIG_STATIC=n", "CONFIG_STATIC=y")
+                config_content = config_content.replace("# CONFIG_STATIC is not set", "CONFIG_STATIC=y")
+                if "CONFIG_STATIC=y" not in config_content:
+                    config_content += "\nCONFIG_STATIC=y\n"
+                
+                # Save the modified config
+                config_path.write_text(config_content)
+                config = config_content
+                
+            except subprocess.CalledProcessError as e:
+                logger.error("Failed to generate BusyBox defconfig")
+                raise RuntimeError("BusyBox defconfig generation failed") from e
+
+        # Validate CONFIG_STATIC=y is present
+        if "CONFIG_STATIC=y" not in config:
+            logger.error("BusyBox config must have CONFIG_STATIC=y")
+            raise ValueError("CONFIG_STATIC not enabled in BusyBox config")
+            
+        return config
+
+    def _setup_rootfs(self):
+        """Setup essential directories and files in rootfs"""
+        # Create essential directories
+        dirs = [
+            "dev", "proc", "sys", "tmp", "var", "run", "etc", "root", "home", "mnt"
+        ]
+        for dir_name in dirs:
+            (self.rootfs_dir / dir_name).mkdir(exist_ok=True)
+        
+        # Create enhanced init script for IPCON testing
+        init_script = self.rootfs_dir / "init"
+        init_script.write_text("""#!/bin/sh
+
+# Mount essential filesystems
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+
+# Create device nodes if needed
+mknod /dev/console c 5 1 2>/dev/null || true
+mknod /dev/null c 1 3 2>/dev/null || true
+
+# Setup hostname
+echo "ipcon-test" > /proc/sys/kernel/hostname
+
+# Configure loopback interface
+ifconfig lo 127.0.0.1 up
+
+# Show system information
+echo "=============================================="
+echo "   IPCON Driver Test Environment"
+echo "=============================================="
+echo "Kernel: $(uname -r)"
+echo "Hostname: $(hostname)"
+echo
+
+# Check if IPCON is loaded
+echo "Checking IPCON driver status..."
+if dmesg | grep -q "ipcon.*init successfully"; then
+    echo "✓ IPCON driver loaded successfully"
+else
+    echo "⚠ IPCON driver may not be loaded properly"
+    echo "  Check with: dmesg | grep ipcon"
+fi
+echo
+
+# Show netlink information
+echo "Netlink families available:"
+cat /proc/net/netlink | head -5
+echo
+
+# Show network configuration
+echo "Network interfaces:"
+ifconfig -a
+echo
+
+# Show helpful commands
+echo "Useful commands for IPCON testing:"
+echo "  dmesg | grep ipcon     - Check IPCON driver messages"
+echo "  cat /proc/net/netlink  - Show netlink sockets"
+echo "  lsmod                  - List loaded modules (built-in won't show)"
+echo "  ip link show           - Show network interfaces"
+echo "  netstat -nl            - Show listening sockets"
+if [ -d "/sys/kernel/debug/ipcon" ]; then
+    echo "  ls /sys/kernel/debug/ipcon/ - IPCON debug info"
+fi
+echo "  poweroff               - Shutdown the VM"
+echo
+
+# Start interactive shell
+exec /bin/sh
+""")
+        init_script.chmod(0o755)
+        
+        # Create basic /etc/passwd
+        passwd_file = self.rootfs_dir / "etc" / "passwd"
+        passwd_file.write_text("root:x:0:0:root:/root:/bin/sh\n")
+        
+        # Create basic /etc/group
+        group_file = self.rootfs_dir / "etc" / "group"
+        group_file.write_text("root:x:0:\n")
+
+    def _create_initramfs(self, output_path):
+        """Create compressed initramfs archive"""
+        logger.info("Creating initramfs archive")
+        
+        # Create cpio archive
+        cpio_cmd = ["find", ".", "-print0", "|", "cpio", "--null", "-ov", "--format=newc"]
+        with open(output_path.with_suffix('.cpio'), 'wb') as f:
+            subprocess.run("find . -print0 | cpio --null -ov --format=newc", 
+                         shell=True, cwd=self.rootfs_dir, stdout=f, check=True)
+        
+        # Compress with gzip
+        with open(output_path.with_suffix('.cpio'), 'rb') as f_in:
+            with gzip.open(output_path, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        
+        # Remove uncompressed cpio
+        output_path.with_suffix('.cpio').unlink()
+
+    def run_vm(self, kernel_version=None, memory="512M", enable_kvm=True):
+        """Launch QEMU virtual machine with custom kernel and rootfs"""
+        if kernel_version is None:
+            kernel_version = self.get_latest_stable_kernel()
+            
+        kernel_path = self.output_dir / f"vmlinuz-{kernel_version}"
+        initramfs_path = self.output_dir / "initramfs.cpio.gz"
+        
+        if not kernel_path.exists():
+            logger.error(f"Kernel not found: {kernel_path}")
+            return False
+            
+        if not initramfs_path.exists():
+            logger.error(f"Initramfs not found: {initramfs_path}")
+            return False
+        
+        # Prepare QEMU command
+        qemu_cmd = [
+            "qemu-system-x86_64",
+            "-kernel", str(kernel_path),
+            "-initrd", str(initramfs_path),
+            "-m", memory,
+            "-nographic",
+            "-append", "console=ttyS0 init=/init quiet",
+            "-no-reboot"
+        ]
+        
+        # Enable KVM if available
+        if enable_kvm and shutil.which("kvm-ok") and subprocess.run(["kvm-ok"], capture_output=True).returncode == 0:
+            qemu_cmd.extend(["-enable-kvm", "-cpu", "host"])
+        
+        logger.info(f"Launching VM with kernel {kernel_version}")
+        logger.info("QEMU command: " + " ".join(qemu_cmd))
+        logger.info("Press Ctrl+A then X to exit QEMU")
+        
+        try:
+            subprocess.run(qemu_cmd, check=True)
+        except KeyboardInterrupt:
+            logger.info("VM terminated by user")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"QEMU failed: {e}")
+            return False
+        
+        return True
+
+    def clean(self, kernel=False, rootfs=False, output=False):
+        """Clean build artifacts while preserving downloaded source packages"""
+        
+        if not any([kernel, rootfs, output]):
+            # Default behavior: clean build artifacts but preserve sources
+            kernel = True
+            rootfs = True
+            output = True
+        
+        cleaned_items = []
+        
+        # Clean kernel build artifacts but preserve source
+        if kernel:
+            if self.kernel_dir.exists():
+                # Clean kernel build artifacts, keep source
+                kernel_build_artifacts = [
+                    "arch/x86/boot/bzImage",
+                    "vmlinux", 
+                    ".config",
+                    "System.map",
+                    "Module.symvers",
+                    ".tmp_versions",
+                    "scripts/basic/fixdep",
+                    "scripts/kconfig/conf"
+                ]
+                
+                for artifact in kernel_build_artifacts:
+                    artifact_path = self.kernel_dir / artifact
+                    if artifact_path.exists():
+                        if artifact_path.is_file():
+                            artifact_path.unlink()
+                            cleaned_items.append(f"Kernel build file: {artifact}")
+                        else:
+                            shutil.rmtree(artifact_path)
+                            cleaned_items.append(f"Kernel build directory: {artifact}")
+                
+                # Clean object files and kernel modules
+                for pattern in ["**/*.o", "**/*.ko", "**/*.cmd"]:
+                    for item in self.kernel_dir.rglob(pattern):
+                        if item.is_file():
+                            item.unlink()
+                
+                logger.info("Cleaned kernel build artifacts (preserved source)")
+        
+        # Clean rootfs build artifacts but preserve busybox source
+        if rootfs:
+            # Clean busybox build artifacts
+            if self.busybox_dir.exists():
+                busybox_build_artifacts = [
+                    "busybox",
+                    "busybox_unstripped",
+                    ".config", 
+                    "_install",
+                    "applets/applets.o",
+                    "applets/built-in.o"
+                ]
+                
+                for artifact in busybox_build_artifacts:
+                    artifact_path = self.busybox_dir / artifact
+                    if artifact_path.exists():
+                        if artifact_path.is_file():
+                            artifact_path.unlink()
+                            cleaned_items.append(f"Busybox build file: {artifact}")
+                        else:
+                            shutil.rmtree(artifact_path)
+                            cleaned_items.append(f"Busybox build directory: {artifact}")
+                
+                # Clean object files
+                for item in self.busybox_dir.rglob("*.o"):
+                    if item.is_file():
+                        item.unlink()
+                
+                logger.info("Cleaned busybox build artifacts (preserved source)")
+            
+            # Clean rootfs directory
+            if self.rootfs_dir.exists():
+                shutil.rmtree(self.rootfs_dir)
+                cleaned_items.append(f"Rootfs directory: {self.rootfs_dir}")
+        
+        # Clean output files
+        if output:
+            if self.output_dir.exists():
+                # Remove specific output files
+                for file in self.output_dir.glob("vmlinuz-*"):
+                    file.unlink()
+                    cleaned_items.append(f"Kernel image: {file}")
+                
+                for file in self.output_dir.glob("initramfs.*"):
+                    file.unlink()
+                    cleaned_items.append(f"Initramfs: {file}")
+                
+                # Remove empty output directory if it exists
+                try:
+                    if not any(self.output_dir.iterdir()):
+                        self.output_dir.rmdir()
+                        cleaned_items.append(f"Empty output directory: {self.output_dir}")
+                except OSError:
+                    pass  # Directory not empty or doesn't exist
+        
+        # Log what was cleaned
+        if cleaned_items:
+            logger.info("Cleaned the following items:")
+            for item in cleaned_items:
+                logger.info(f"  - {item}")
+        else:
+            logger.info("No artifacts found to clean")
+        
+        return len(cleaned_items) > 0
+
+    def cleanall(self):
+        """Remove all build artifacts including downloaded source packages"""
+        cleaned_items = []
+        
+        if self.work_dir.exists():
+            shutil.rmtree(self.work_dir)
+            cleaned_items.append(f"All build artifacts and sources: {self.work_dir}")
+            logger.info("Removed all build artifacts including downloaded packages")
+        else:
+            logger.info("No artifacts found to clean")
+        
+        return len(cleaned_items) > 0
+
+def main():
+    parser = argparse.ArgumentParser(description="IPCON Driver Test Tool")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
+    
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+    
+    # Kernel build command
+    kernel_parser = subparsers.add_parser("build-kernel", help="Build Linux kernel with IPCON")
+    kernel_parser.add_argument("--version", help="Kernel version (default: latest stable)")
+    kernel_parser.add_argument("--config-only", action="store_true", help="Only generate config, don't build")
+    
+    # Rootfs build command
+    rootfs_parser = subparsers.add_parser("build-rootfs", help="Build minimal rootfs with busybox")
+    rootfs_parser.add_argument("--version", help="Busybox version")
+    
+    # VM launch command
+    vm_parser = subparsers.add_parser("run-vm", help="Launch QEMU virtual machine")
+    vm_parser.add_argument("--kernel-version", help="Kernel version to use")
+    vm_parser.add_argument("--memory", default="512M", help="VM memory (default: 512M)")
+    vm_parser.add_argument("--no-kvm", action="store_true", help="Disable KVM acceleration")
+    
+    # All-in-one command
+    all_parser = subparsers.add_parser("all", help="Build kernel, rootfs and run VM")
+    all_parser.add_argument("--kernel-version", help="Kernel version")
+    all_parser.add_argument("--busybox-version", help="Busybox version")
+    all_parser.add_argument("--memory", default="512M", help="VM memory")
+    all_parser.add_argument("--no-kvm", action="store_true", help="Disable KVM")
+    
+    # Clean command - preserves downloaded packages
+    clean_parser = subparsers.add_parser("clean", help="Clean build artifacts (preserves downloaded packages)")
+    clean_parser.add_argument("--kernel", action="store_true", help="Remove only kernel build artifacts")
+    clean_parser.add_argument("--rootfs", action="store_true", help="Remove only rootfs build artifacts")
+    clean_parser.add_argument("--output", action="store_true", help="Remove only output files (kernel image, initramfs)")
+    
+    # Clean all command - removes everything including downloaded packages
+    cleanall_parser = subparsers.add_parser("cleanall", help="Remove all build artifacts including downloaded packages")
+    
+    args = parser.parse_args()
+    
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    
+    tool = IPCONTestTool()
+    
+    try:
+        if args.command == "build-kernel":
+            tool.build_kernel(args.version, args.config_only)
+        elif args.command == "build-rootfs":
+            tool.build_rootfs(args.version)
+        elif args.command == "run-vm":
+            tool.run_vm(args.kernel_version, args.memory, not args.no_kvm)
+        elif args.command == "all":
+            logger.info("Building kernel...")
+            tool.build_kernel(args.kernel_version)
+            logger.info("Building rootfs...")
+            tool.build_rootfs(args.busybox_version)
+            logger.info("Launching VM...")
+            tool.run_vm(args.kernel_version, args.memory, not args.no_kvm)
+        elif args.command == "clean":
+            tool.clean(
+                kernel=args.kernel,
+                rootfs=args.rootfs,
+                output=args.output
+            )
+        elif args.command == "cleanall":
+            tool.cleanall()
+        else:
+            parser.print_help()
+    
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
