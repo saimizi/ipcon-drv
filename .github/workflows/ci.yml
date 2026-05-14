@@ -89,16 +89,20 @@ jobs:
     - name: Build driver
       run: |
         KBP="$PWD/kernel-build/linux-${{ matrix.kernel }}"
-        # Write Makefile with literal tabs for make
-        printf '%s\n' \
-          'obj-m := ipcon.o' \
-          'ipcon-objs := main.o ipcon_nl.o ipcon_msg.o ipcon_db.o name_cache.o ipcon_debugfs.o' \
-          'ccflags-y += -DCONFIG_IPCON=1 -DCONFIG_DEBUG_FS=1 -DIPCON_CI_BUILD=1' \
-          'all:' \
-          '\t$(MAKE) -C $(KERNEL_BUILD_PATH) M=$(PWD) modules' \
-          'clean:' \
-          '\t$(MAKE) -C $(KERNEL_BUILD_PATH) M=$(PWD) clean' \
-          > Makefile
+        # Write Makefile using Python heredoc to reliably produce tab chars
+        python3 << 'PYEOF'
+        lines = [
+            'obj-m := ipcon.o',
+            'ipcon-objs := main.o ipcon_nl.o ipcon_msg.o ipcon_db.o name_cache.o ipcon_debugfs.o',
+            'ccflags-y += -DCONFIG_IPCON=1 -DCONFIG_DEBUG_FS=1 -DIPCON_CI_BUILD=1',
+            'all:',
+            '\t$(MAKE) -C $(KERNEL_BUILD_PATH) M=$(PWD) modules',
+            'clean:',
+            '\t$(MAKE) -C $(KERNEL_BUILD_PATH) M=$(PWD) clean',
+        ]
+        with open('Makefile', 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        PYEOF
         export KERNEL_BUILD_PATH="$KBP"
         if [ "${{ matrix.arch }}" = "aarch64" ]; then
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- KERNEL_BUILD_PATH="$KBP" V=1
