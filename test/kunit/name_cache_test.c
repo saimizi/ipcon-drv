@@ -155,15 +155,13 @@ static void nc_test_refname_valid(struct kunit *test)
 	nc_exit();
 }
 
-static struct kunit_case nc_test_cases[] = {
-	KUNIT_CASE(nc_test_create_destroy),
-	KUNIT_CASE(nc_test_add_lookup),
-	KUNIT_CASE(nc_test_ref_counting),
-	KUNIT_CASE(nc_test_invalid_name),
-	KUNIT_CASE(nc_test_multiple_names),
-	KUNIT_CASE(nc_test_refname_valid),
-	{}
-};
+static struct kunit_case nc_test_cases[] = { KUNIT_CASE(nc_test_create_destroy),
+					     KUNIT_CASE(nc_test_add_lookup),
+					     KUNIT_CASE(nc_test_ref_counting),
+					     KUNIT_CASE(nc_test_invalid_name),
+					     KUNIT_CASE(nc_test_multiple_names),
+					     KUNIT_CASE(nc_test_refname_valid),
+					     {} };
 
 static struct kunit_suite nc_test_suite = {
 	.name = "ipcon-name-cache",

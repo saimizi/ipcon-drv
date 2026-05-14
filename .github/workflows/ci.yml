@@ -79,7 +79,6 @@ jobs:
         cd kernel-build
         wget -q "${{ matrix.url }}"
         tar -xf "linux-${{ matrix.kernel }}.tar.xz"
-        mv "linux-${{ matrix.kernel }}" "linux-${{ matrix.kernel }}"  # rename is idempotent
         cd "linux-${{ matrix.kernel }}"
         if [ "${{ matrix.arch }}" = "aarch64" ]; then
           make ARCH=arm64 defconfig && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
@@ -156,7 +155,7 @@ jobs:
         cp ${{ github.workspace }}/Kconfig ${{ github.workspace }}/Makefile net/netlink/ipcon/
         cp ${{ github.workspace }}/test/kunit/*.c   net/netlink/ipcon/test/
         cp ${{ github.workspace }}/test/kunit/Makefile net/netlink/ipcon/test/
-        # test/Kconfig is separate; the kunitconfig below is the CI config
+        cp ${{ github.workspace }}/test/kunit/Kconfig net/netlink/ipcon/test/
 
         # Patch netlink Kconfig/Makefile
         echo 'source "net/netlink/ipcon/Kconfig"' >> net/netlink/Kconfig
@@ -170,7 +169,6 @@ jobs:
         cat > .kunitconfig << 'KC'
         CONFIG_KUNIT=y
         CONFIG_KUNIT_ALL_TESTS=n
-        CONFIG_KUNIT_EXPECTATION_FAILED=y
         CONFIG_IPCON=y
         CONFIG_IPCON_KUNIT_TEST=y
         CONFIG_DEBUG_FS=y

@@ -15,13 +15,10 @@
 /*
  * Helper: register a test peer in the database
  */
-static struct ipcon_peer_node *create_test_peer(struct kunit *test,
-						struct ipcon_peer_db *db,
-						const char *name,
-						enum peer_type type,
-						u32 ctrl_port, u32 snd_port,
-						u32 rcv_port,
-						unsigned long flags)
+static struct ipcon_peer_node *
+create_test_peer(struct kunit *test, struct ipcon_peer_db *db, const char *name,
+		 enum peer_type type, u32 ctrl_port, u32 snd_port, u32 rcv_port,
+		 unsigned long flags)
 {
 	int nameid, commid;
 	struct ipcon_peer_node *ipn;
@@ -33,8 +30,8 @@ static struct ipcon_peer_node *create_test_peer(struct kunit *test,
 	commid = nc_add(process_name, GFP_KERNEL);
 	KUNIT_ASSERT_GT(test, commid, 0);
 
-	ipn = ipn_alloc(ctrl_port, snd_port, rcv_port, nameid,
-			commid, current->pid, type, flags, GFP_KERNEL);
+	ipn = ipn_alloc(ctrl_port, snd_port, rcv_port, nameid, commid,
+			current->pid, type, flags, GFP_KERNEL);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, ipn);
 
 	KUNIT_ASSERT_EQ(test, ipd_insert(db, ipn), 0);
@@ -68,8 +65,8 @@ static void ipcon_db_test_insert_lookup_name(struct kunit *test)
 	db = ipd_alloc(GFP_KERNEL);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, db);
 
-	ipn = create_test_peer(test, db, "test_srv", PEER_TYPE_NORMAL,
-			       100, 200, 300, 0);
+	ipn = create_test_peer(test, db, "test_srv", PEER_TYPE_NORMAL, 100, 200,
+			       300, 0);
 
 	/* Lookup by name */
 	found = ipd_lookup_byname(db, ipn->nameid);
@@ -101,13 +98,12 @@ static void ipcon_db_test_insert_duplicate(struct kunit *test)
 	db = ipd_alloc(GFP_KERNEL);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, db);
 
-	ipn1 = create_test_peer(test, db, "dup_peer", PEER_TYPE_NORMAL,
-			       101, 201, 301, 0);
+	ipn1 = create_test_peer(test, db, "dup_peer", PEER_TYPE_NORMAL, 101,
+				201, 301, 0);
 
 	/* Second peer with same name should fail */
-	ipn2 = ipn_alloc(102, 202, 302, ipn1->nameid,
-			 ipn1->commid, current->pid, PEER_TYPE_NORMAL,
-			 0, GFP_KERNEL);
+	ipn2 = ipn_alloc(102, 202, 302, ipn1->nameid, ipn1->commid,
+			 current->pid, PEER_TYPE_NORMAL, 0, GFP_KERNEL);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, ipn2);
 	KUNIT_EXPECT_LT(test, ipd_insert(db, ipn2), 0);
 	ipn_free(ipn2);
@@ -195,8 +191,8 @@ static void ipcon_db_test_peer_anon_type(struct kunit *test)
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, db);
 
 	/* Create anonymous peer */
-	ipn = create_test_peer(test, db, "anon_1", PEER_TYPE_ANON,
-			       200, IPCON_INVALID_PORT, IPCON_INVALID_PORT,
+	ipn = create_test_peer(test, db, "anon_1", PEER_TYPE_ANON, 200,
+			       IPCON_INVALID_PORT, IPCON_INVALID_PORT,
 			       IPCON_FLG_ANON_PEER);
 	KUNIT_EXPECT_EQ(test, ipn->type, PEER_TYPE_ANON);
 
@@ -224,8 +220,8 @@ static void ipcon_db_test_group_insert_remove(struct kunit *test)
 	db = ipd_alloc(GFP_KERNEL);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, db);
 
-	ipn = create_test_peer(test, db, "grp_peer", PEER_TYPE_NORMAL,
-			       301, 302, 303, 0);
+	ipn = create_test_peer(test, db, "grp_peer", PEER_TYPE_NORMAL, 301, 302,
+			       303, 0);
 
 	/* Add a group */
 	group_nameid = nc_add("test_group", GFP_KERNEL);
