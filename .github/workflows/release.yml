@@ -1,0 +1,215 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'Kconfig'       # Version changes indicated by Kconfig date/description changes
+
+permissions:
+  contents: write
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+      should_release: ${{ steps.check.outputs.should_release }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version
+        id: extract
+        run: |
+          # Use git tag or commit date for version
+          VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+          # Strip 'v' prefix if present
+          VERSION="${VERSION#v}"
+          
+          # If no tags exist, generate version from commit count
+          if [ "$VERSION" = "0.0.0" ]; then
+            COMMIT_COUNT=$(git rev-list --count HEAD)
+            VERSION="0.1.${COMMIT_COUNT}"
+          fi
+          
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Extracted version: ${VERSION}"
+
+      - name: Check if release needed
+        id: check
+        run: |
+          VERSION="${{ steps.extract.outputs.version }}"
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "Tag v${VERSION} already exists, skipping release"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "New version detected: v${VERSION}"
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          fi
+
+  create-release:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            ruby \
+            ruby-dev \
+            rubygems
+          sudo gem install --no-document fpm
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "First release - generating full changelog"
+            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges)
+          else
+            echo "Generating changelog from ${PREV_TAG}"
+            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          fi
+
+          cat > changelog.md << EOF
+          ## IPCON Driver v${VERSION}
+
+          ## Changes
+
+          ${COMMITS}
+
+          ## Installation
+
+          ### In-tree build (recommended)
+
+          Apply patches from \`doc/patches/\` to kernel source:
+
+          \`\`\`bash
+          cd linux-source
+          git am /path/to/ipcon-drv/doc/patches/*.patch
+          cp -r /path/to/ipcon-drv net/netlink/ipcon/
+          make menuconfig  # Enable General setup > IPC Over Netlink(IPCON)
+          make -j\$(nproc)
+          \`\`\`
+
+          ### DKMS (for modular builds)
+
+          For testing purposes, the driver can be built as a loadable module:
+
+          \`\`\`bash
+          tar -xzf ipcon-driver-v${VERSION}.tar.gz
+          cd ipcon-driver-${VERSION}
+          export KERNEL_BUILD_PATH=/lib/modules/\$(uname -r)/build
+          make -f Makefile.module
+          sudo insmod ipcon.ko
+          \`\`\`
+          EOF
+
+          echo "Changelog generated"
+
+      - name: Create source tarball
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          git archive --format=tar.gz \
+            --prefix=ipcon-driver-${VERSION}/ \
+            -o ipcon-driver-${VERSION}.tar.gz \
+            HEAD
+
+          echo "Tarball created: ipcon-driver-${VERSION}.tar.gz"
+
+      - name: Build test (package validation)
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          KERNEL_VER="6.12"
+          
+          # Quick build validation
+          wget -q "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KERNEL_VER}.tar.xz"
+          tar -xf "linux-${KERNEL_VER}.tar.xz"
+          cd "linux-${KERNEL_VER}"
+          make defconfig
+          make modules_prepare
+          
+          cd ..
+          printf '%s\n' \
+            'obj-m := ipcon.o' \
+            'ipcon-objs := main.o ipcon_nl.o ipcon_msg.o ipcon_db.o name_cache.o ipcon_debugfs.o' \
+            'ccflags-y += -DCONFIG_IPCON=1 -DCONFIG_DEBUG_FS=1 -DIPCON_CI_BUILD=1' \
+            'all:' \
+            '\t$(MAKE) -C $(KERNEL_BUILD_PATH) M=$(PWD) modules' \
+            'clean:' \
+            '\t$(MAKE) -C $(KERNEL_BUILD_PATH) M=$(PWD) clean' \
+            > Makefile
+          
+          export KERNEL_BUILD_PATH=$(pwd)/linux-${KERNEL_VER}
+          make V=1
+          
+          if [ ! -f ipcon.ko ]; then
+            echo "❌ Build validation failed"
+            exit 1
+          fi
+          echo "✅ Build validation passed"
+
+      - name: Create DKMS package with fpm
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+
+          mkdir -p package-build/usr/src/ipcon-${VERSION}
+          cp *.c *.h Kconfig Makefile package-build/usr/src/ipcon-${VERSION}/
+          cp -r doc package-build/usr/src/ipcon-${VERSION}/
+
+          # Create dkms.conf
+          cat > package-build/usr/src/ipcon-${VERSION}/dkms.conf << DKMS
+          PACKAGE_NAME="ipcon"
+          PACKAGE_VERSION="${VERSION}"
+          BUILT_MODULE_NAME[0]="ipcon"
+          DEST_MODULE_LOCATION[0]="/kernel/net/netlink/"
+          MAKE="make KERNEL_BUILD_PATH=\\\$(kernel_source_dir) -C \\\$(kernel_source_dir) M=\\\$(PWD) modules"
+          CLEAN="make -C \\\$(kernel_source_dir) M=\\\$(PWD) clean"
+          AUTOINSTALL="yes"
+          DKMS
+
+          fpm -s dir -t deb \
+            -n ipcon-driver-dkms \
+            -v ${VERSION} \
+            -a all \
+            --description "IPCON Driver - IPC Over Netlink (DKMS)" \
+            --url "https://github.com/saimizi/ipcon-drv" \
+            --license "GPL-2.0" \
+            --maintainer "saimizi" \
+            --category kernel \
+            --deb-priority optional \
+            --depends dkms \
+            -C package-build \
+            usr
+
+          echo "DKMS package created"
+          ls -lh *.deb
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+
+          gh release create "v${VERSION}" \
+            --title "IPCON Driver v${VERSION}" \
+            --notes-file changelog.md \
+            ipcon-driver-${VERSION}.tar.gz \
+            ipcon-driver-dkms_${VERSION}_all.deb
+
+          echo "✅ Release v${VERSION} created successfully!"
