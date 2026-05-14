@@ -94,7 +94,7 @@ jobs:
         lines = [
             'obj-m := ipcon.o',
             'ipcon-objs := main.o ipcon_nl.o ipcon_msg.o ipcon_db.o name_cache.o ipcon_debugfs.o',
-            'ccflags-y += -DCONFIG_IPCON=1 -DCONFIG_DEBUG_FS=1 -DIPCON_CI_BUILD=1 -Wno-missing-prototypes',
+            'ccflags-y += -DCONFIG_IPCON=1 -DCONFIG_DEBUG_FS=1 -DIPCON_CI_BUILD=1 -Wno-missing-prototypes -Wno-missing-declarations',
             'all:',
             '\t$(MAKE) -C $(KERNEL_BUILD_PATH) M=$(PWD) modules',
             'clean:',
