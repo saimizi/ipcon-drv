@@ -15,6 +15,7 @@
 
 #include <linux/netlink.h>
 #include <net/sock.h>
+#include <linux/version.h>
 
 /*
  * Netlink socket structure - simplified version for portid access
@@ -57,21 +58,20 @@ static inline struct netlink_sock *nlk_sk(struct sock *sk)
  * for filtering functionality. We provide a wrapper that falls back to
  * standard netlink_broadcast when filtering is not critical.
  */
+/*
+ * Only provide the fallback for older kernels where
+ * netlink_broadcast_filtered is not declared in linux/netlink.h.
+ * Kernels 6.2+ already have this function declared in public headers.
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0)
 static inline int netlink_broadcast_filtered(
 	struct sock *sk, struct sk_buff *skb, u32 portid, u32 group,
 	gfp_t flags,
 	int (*filter)(struct sock *dsk, struct sk_buff *skb, void *data),
 	void *filter_data)
 {
-	/*
-	 * For out-of-tree builds, we fall back to standard netlink_broadcast.
-	 * This reduces functionality but maintains compatibility.
-	 * 
-	 * Note: filter and filter_data parameters are ignored in this implementation.
-	 * For full filtering support, the module should be built in-tree where
-	 * the internal netlink_broadcast_filtered function is available.
-	 */
 	return netlink_broadcast(sk, skb, portid, group, flags);
 }
+#endif
 
 #endif /* _AF_NETLINK_H */
