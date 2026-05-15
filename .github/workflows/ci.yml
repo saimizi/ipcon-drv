@@ -70,7 +70,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: kernel-build/linux-${{ matrix.kernel }}
-        key: kernel-src-${{ matrix.kernel }}
+        key: kernel-src-${{ matrix.kernel }}-${{ matrix.arch }}
 
     - name: Download and prepare kernel
       if: steps.cache-kernel.outputs.cache-hit != 'true'
