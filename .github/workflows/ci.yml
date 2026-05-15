@@ -160,8 +160,8 @@ jobs:
         cp ${{ github.workspace }}/test/kunit/*.c lib/kunit/
         echo "obj-y += name_cache_test.o" >> lib/kunit/Makefile
         echo "obj-y += ipcon_db_test.o" >> lib/kunit/Makefile
-        # Copy ipcon headers needed by tests
-        cp ${{ github.workspace }}/ipcon.h ${{ github.workspace }}/name_cache.h ${{ github.workspace }}/ipcon_db.h lib/kunit/
+        # Copy ALL ipcon driver headers (tests need ipcon_dbg.h)
+        cp ${{ github.workspace }}/*.h lib/kunit/
         # Add kernel source root to include path
         echo "ccflags-y += -I\$(srctree)" >> lib/kunit/Makefile
         echo "ccflags-y += -I\$(srctree)/lib/kunit" >> lib/kunit/Makefile
