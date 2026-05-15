@@ -579,14 +579,15 @@ void ipd_free(struct ipcon_peer_db *ipd)
 
 		ipd_wr_lock(ipd)
 
-		/* Free all peer nodes. Use name_ht since every peer is in it. */
-		if (!hash_empty(ipd->ipd_name_ht))
-			hash_for_each_safe(ipd->ipd_name_ht, bkt, tmp, ipn,
-					   ipn_hname) ipn_free(ipn);
+			/* Free all peer nodes. Use name_ht since every peer is in it. */
+			if (!hash_empty(ipd->ipd_name_ht))
+				hash_for_each_safe(ipd->ipd_name_ht, bkt, tmp,
+						   ipn, ipn_hname)
+					ipn_free(ipn);
 
 		ipd_wr_unlock(ipd)
 
-		kfree(ipd);
+			kfree(ipd);
 
 	} while (0);
 }
