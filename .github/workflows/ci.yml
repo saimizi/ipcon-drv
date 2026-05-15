@@ -178,6 +178,8 @@ jobs:
         # Create KUnit config
         cat > .kunitconfig << 'KC'
         CONFIG_KUNIT=y
+        CONFIG_IPCON=y
+        CONFIG_DEBUG_FS=y
         KC
 
         # Run (retry with reduced parallelism on resource-constrained runners)
