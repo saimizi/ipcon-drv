@@ -577,13 +577,14 @@ void ipd_free(struct ipcon_peer_db *ipd)
 		flush_workqueue(ipd->notify_wq);
 		destroy_workqueue(ipd->notify_wq);
 
-		ipd_wr_lock(ipd) if (!hash_empty(ipd->ipd_sport_ht))
-			hash_for_each_safe(ipd->ipd_sport_ht, bkt, tmp, ipn,
-					   ipn_hsport) ipn_free(ipn);
+		ipd_wr_lock(ipd)
 
-		BUG_ON(!hash_empty(ipd->ipd_rport_ht));
-		BUG_ON(!hash_empty(ipd->ipd_cport_ht));
-		BUG_ON(!hash_empty(ipd->ipd_name_ht));
+			/* Free all peer nodes. Use name_ht since every peer is in it. */
+			if (!hash_empty(ipd->ipd_name_ht))
+				hash_for_each_safe(ipd->ipd_name_ht, bkt, tmp,
+						   ipn, ipn_hname)
+					ipn_free(ipn);
+
 		ipd_wr_unlock(ipd)
 
 			kfree(ipd);

@@ -125,7 +125,7 @@ static inline int group_inuse(struct ipcon_peer_db *db, int group)
 	int ret = 0;
 
 	read_lock(&db->group_bitmap_lock);
-	ret = test_bit(group, db->group_bitmap);
+	ret = test_bit(group - 1, db->group_bitmap);
 	read_unlock(&db->group_bitmap_lock);
 
 	return ret;

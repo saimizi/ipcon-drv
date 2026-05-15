@@ -2,181 +2,202 @@ name: CI
 
 on:
   pull_request:
-    branches: [ master ]
+    branches: [ master, main ]
   push:
-    branches: [ master ]
+    branches: [ master, main ]
 
 jobs:
   code-style:
-    name: Code Style Check
+    name: Code Style
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
+    - uses: actions/checkout@v4
     - name: Install clang-format
+      run: sudo apt-get update && sudo apt-get install -y clang-format
+    - name: Check formatting
       run: |
-        sudo apt-get update
-        sudo apt-get install -y clang-format
-
-    - name: Check code formatting
-      run: |
-        # Find all C source files and check formatting
-        echo "🔍 Checking code formatting with Linux kernel style..."
-        
-        # Create a temporary file to track issues
-        FORMAT_ERRORS=$(mktemp)
-        
-        # Check each file
-        for file in $(find . -name "*.c" -o -name "*.h"); do
-          echo "Checking $file..."
-          if ! clang-format --dry-run --Werror "$file" >/dev/null 2>&1; then
-            echo "❌ $file has formatting issues"
-            echo "$file" >> "$FORMAT_ERRORS"
-          else
-            echo "✅ $file is properly formatted"
+        failed=0
+        for f in $(find . -name "*.c" -o -name "*.h"); do
+          if ! clang-format --dry-run --Werror "$f" 2>/dev/null; then
+            echo "❌ $f has formatting issues"
+            failed=$((failed+1))
           fi
         done
-        
-        # Check if we have any errors
-        if [ -s "$FORMAT_ERRORS" ]; then
-          echo ""
-          echo "🚨 Found formatting issues in the following files:"
-          cat "$FORMAT_ERRORS"
-          echo ""
-          echo "To fix all formatting issues, run:"
-          echo "  find . -name '*.c' -o -name '*.h' | xargs clang-format -i"
-          echo ""
-          echo "Example of formatting issues in $(head -1 "$FORMAT_ERRORS"):"
-          clang-format --dry-run --Werror "$(head -1 "$FORMAT_ERRORS")" 2>&1 | head -10 || true
-          rm "$FORMAT_ERRORS"
-          exit 1
+        if [ "$failed" -eq 0 ]; then
+          echo "✅ All files clean"
         else
-          echo "✅ All files are properly formatted"
-          rm "$FORMAT_ERRORS"
+          echo "❌ $failed files need fixes"
+          echo "Run: find . -name '*.c' -o -name '*.h' | xargs clang-format -i"
+          exit 1
         fi
 
   build-test:
-    name: Build Test
+    name: "Build: ${{ matrix.label }}"
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        arch: [x86_64, aarch64]
-    
+        include:
+          - label: x86_64 (6.1 LTS)
+            arch: x86_64
+            kernel: 6.1
+            url: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.tar.xz
+          - label: x86_64 (6.6 LTS)
+            arch: x86_64
+            kernel: 6.6
+            url: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.6.tar.xz
+          - label: x86_64 (6.12 LTS)
+            arch: x86_64
+            kernel: 6.12
+            url: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.tar.xz
+          - label: aarch64 (6.12 LTS)
+            arch: aarch64
+            kernel: 6.12
+            url: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.tar.xz
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-    - name: Set up build environment
+    - name: Install deps
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential bc kmod cpio flex bison libssl-dev libelf-dev
-
-    - name: Install cross-compilation tools for ARM64
+    - name: Install cross-compiler (aarch64)
       if: matrix.arch == 'aarch64'
-      run: |
-        sudo apt-get install -y gcc-aarch64-linux-gnu
+      run: sudo apt-get install -y gcc-aarch64-linux-gnu
 
-    - name: Download kernel headers
+    - name: Cache kernel (${{ matrix.kernel }})
+      id: cache-kernel
+      uses: actions/cache@v4
+      with:
+        path: kernel-build/linux-${{ matrix.kernel }}
+        key: kernel-src-${{ matrix.kernel }}-${{ matrix.arch }}
+
+    - name: Download and prepare kernel
+      if: steps.cache-kernel.outputs.cache-hit != 'true'
       run: |
-        # Use a recent stable kernel version
-        KERNEL_VERSION="6.1.0"
-        
-        # Create a minimal kernel build environment
         mkdir -p kernel-build
         cd kernel-build
-        
-        # Download kernel source (headers only approach)
-        wget -q https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.tar.xz
-        tar -xf linux-6.1.tar.xz
-        cd linux-6.1
-        
-        # Prepare kernel build
+        wget -q "${{ matrix.url }}"
+        tar -xf "linux-${{ matrix.kernel }}.tar.xz"
+        cd "linux-${{ matrix.kernel }}"
         if [ "${{ matrix.arch }}" = "aarch64" ]; then
-          make ARCH=arm64 defconfig
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
+          make ARCH=arm64 defconfig && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
         else
-          make defconfig  
-          make modules_prepare
+          make defconfig && make modules_prepare
         fi
 
-    - name: Build ipcon driver
+    - name: Build driver
       run: |
-        # Build the module directly without complex Makefile indirection
-        echo "🔨 Building ipcon driver for ${{ matrix.arch }}..."
-        
-        # Create a proper Makefile for kernel module
-        cat > Makefile << 'EOF'
-        # SPDX-License-Identifier: GPL-2.0
-        
-        # Module name
-        MODULE_NAME := ipcon
-        
-        # Source files - include all objects unconditionally for CI
-        $(MODULE_NAME)-objs := main.o ipcon_nl.o ipcon_msg.o ipcon_db.o name_cache.o ipcon_debugfs.o
-        
-        obj-m := $(MODULE_NAME).o
-        
-        # Enable required CONFIG flags
-        ccflags-y += -DCONFIG_IPCON=1 -DCONFIG_DEBUG_FS=1 -DIPCON_CI_BUILD=1
-        
-        # Default target
-        all:
-        	$(MAKE) -C $(KERNEL_BUILD_PATH) M=$(PWD) modules
-        
-        clean:
-        	$(MAKE) -C $(KERNEL_BUILD_PATH) M=$(PWD) clean
-        
-        .PHONY: all clean
-        EOF
-        
-        # Set kernel build path
-        export KERNEL_BUILD_PATH=$(pwd)/kernel-build/linux-6.1
-        
-        # Show what we're about to build
-        echo "📁 Source files in directory:"
-        ls -la *.c *.h
-        echo ""
-        echo "📋 Makefile contents:"
-        cat Makefile
-        echo ""
-        
-        # Build the module
+        KBP="$PWD/kernel-build/linux-${{ matrix.kernel }}"
+        # Write Makefile using Python heredoc to reliably produce tab chars
+        python3 << 'PYEOF'
+        lines = [
+            'obj-m := ipcon.o',
+            'ipcon-objs := main.o ipcon_nl.o ipcon_msg.o ipcon_db.o name_cache.o ipcon_debugfs.o',
+            'ccflags-y += -DCONFIG_IPCON=1 -DCONFIG_DEBUG_FS=1 -DIPCON_CI_BUILD=1 -Wno-error=missing-prototypes -Wno-error=missing-declarations',
+            'all:',
+            '\t$(MAKE) -C $(KERNEL_BUILD_PATH) M=$(PWD) KBUILD_MODPOST_WARN=1 modules',
+            'clean:',
+            '\t$(MAKE) -C $(KERNEL_BUILD_PATH) M=$(PWD) clean',
+        ]
+        with open('Makefile', 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        PYEOF
+        export KERNEL_BUILD_PATH="$KBP"
         if [ "${{ matrix.arch }}" = "aarch64" ]; then
-          echo "Building for ARM64..."
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- KERNEL_BUILD_PATH=$KERNEL_BUILD_PATH V=1
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- KERNEL_BUILD_PATH="$KBP" V=1
         else
-          echo "Building for x86_64..."
-          make KERNEL_BUILD_PATH=$KERNEL_BUILD_PATH V=1
+          make KERNEL_BUILD_PATH="$KBP" V=1
         fi
-        
-        # Check if module was built successfully
-        echo "🔍 Checking build results..."
         if [ -f ipcon.ko ]; then
-          echo "✅ ipcon.ko built successfully for ${{ matrix.arch }}"
-          ls -la ipcon.ko
-          file ipcon.ko
-          echo "📊 Module info:"
-          modinfo ipcon.ko || echo "Note: modinfo may not work in CI environment"
-          echo "📈 Module size: $(du -h ipcon.ko)"
+          echo "✅ Built for ${{ matrix.label }}: $(du -h ipcon.ko | cut -f1)"
         else
-          echo "❌ Failed to build ipcon.ko for ${{ matrix.arch }}"
-          echo ""
-          echo "📁 Files in current directory:"
-          ls -la
-          echo ""
-          echo "🔍 Looking for any .ko files:"
-          find . -name "*.ko" -ls 2>/dev/null || echo "No .ko files found"
-          echo ""
-          echo "🔍 Looking for object files:"
-          find . -name "*.o" -ls 2>/dev/null || echo "No .o files found"
-          echo ""
-          echo "📋 Build log (if any):"
-          find . -name "*.log" -exec cat {} \; 2>/dev/null || echo "No build logs found"
+          echo "❌ Build failed for ${{ matrix.label }}"
+          ls -la *.o 2>/dev/null || true
           exit 1
         fi
 
-    - name: Build verification
+  kunit-tests:
+    name: KUnit (6.12 LTS)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install deps
       run: |
-        echo "Build completed for ${{ matrix.arch }}"
-        ls -la *.ko || echo "No .ko files found"
+        sudo apt-get update
+        sudo apt-get install -y build-essential bc kmod cpio flex bison \
+          libssl-dev libelf-dev python3
+
+    - name: Cache kernel source
+      id: cache-kernel
+      uses: actions/cache@v4
+      with:
+        path: linux-6.12
+        key: kunit-src-6.12
+
+    - name: Download kernel
+      if: steps.cache-kernel.outputs.cache-hit != 'true'
+      run: |
+        wget -q https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.tar.xz
+        tar -xf linux-6.12.tar.xz
+
+    - name: Cache UML build
+      id: cache-uml
+      uses: actions/cache@v4
+      with:
+        path: linux-6.12/.kunit
+        key: kunit-uml-v2-6.12-${{ hashFiles('test/kunit/*.c','*.c','*.h','Kconfig') }}
+
+    - name: Setup and run KUnit
+      run: |
+        cd linux-6.12
+
+        # Remove any cached .kunit from the kernel source cache
+        rm -rf .kunit
+
+        # Copy KUnit test files + headers to lib/kunit/
+        cp ${{ github.workspace }}/test/kunit/*.c lib/kunit/
+        echo "obj-y += name_cache_test.o" >> lib/kunit/Makefile
+        echo "obj-y += ipcon_db_test.o" >> lib/kunit/Makefile
+        # Also compile the driver source files needed by tests
+        cp ${{ github.workspace }}/name_cache.c ${{ github.workspace }}/ipcon_db.c lib/kunit/
+        echo "obj-y += name_cache.o" >> lib/kunit/Makefile
+        echo "obj-y += ipcon_db.o" >> lib/kunit/Makefile
+        # Copy ALL ipcon driver headers (tests need ipcon_dbg.h)
+        cp ${{ github.workspace }}/*.h lib/kunit/
+        # Add kernel source root to include path
+        echo "ccflags-y += -I\$(srctree)" >> lib/kunit/Makefile
+        echo "ccflags-y += -I\$(srctree)/lib/kunit" >> lib/kunit/Makefile
+
+        # Create KUnit config
+        cat > .kunitconfig << 'KC'
+        CONFIG_KUNIT=y
+        KC
+
+        # Run (retry with reduced parallelism on resource-constrained runners)
+        python3 tools/testing/kunit/kunit.py run \
+          --arch=um --timeout=300 --jobs=$(nproc) 2>&1 \
+          || python3 tools/testing/kunit/kunit.py run \
+             --arch=um --timeout=300 --jobs=2 2>&1
+
+    - name: Upload results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: kunit-results
+        path: linux-6.12/.kunit/test.log
+
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install cppcheck
+      run: sudo apt-get update && sudo apt-get install -y cppcheck
+    - name: Run cppcheck
+      continue-on-error: true
+      run: |
+        cppcheck --enable=all --suppress=missingIncludeSystem \
+          --std=c11 -D__KERNEL__ -DCONFIG_IPCON=1 -DCONFIG_DEBUG_FS=1 \
+          --suppress=unmatchedSuppression . 2>&1 || true

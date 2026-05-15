@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# IPCON KUnit tests - add to kernel tree's drivers/net/Kconfig or similar
+#
+# When patching ipcon into the kernel source tree, add this to Kconfig:
+#
+#   source "drivers/net/ipcon/test/Kconfig"
+#
+# For out-of-tree CI, use the kunit.py tool directly.
+#
+
+config IPCON_KUNIT_TEST
+	tristate "KUnit tests for IPCON driver" if !KUNIT_ALL_TESTS
+	depends on KUNIT
+	select IPCON
+	default KUNIT_ALL_TESTS
+	help
+	  Build unit tests for the IPCON (IPC Over Netlink) driver.
+	  These tests cover the name cache and peer database functionality.
+
+	  For more information on KUnit, see Documentation/dev-tools/kunit/.
+
+	  If unsure, say N.
