@@ -147,7 +147,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: linux-6.12/.kunit
-        key: kunit-uml-6.12-${{ hashFiles('test/kunit/*.c','*.c','*.h','Kconfig') }}
+        key: kunit-uml-v2-6.12-${{ hashFiles('test/kunit/*.c','*.c','*.h','Kconfig') }}
 
     - name: Setup and run KUnit
       run: |
