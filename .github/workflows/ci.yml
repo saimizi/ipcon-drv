@@ -156,30 +156,19 @@ jobs:
         # Remove any cached .kunit from the kernel source cache
         rm -rf .kunit
 
-        # Integrate ipcon driver + KUnit tests into kernel tree
-        mkdir -p net/netlink/ipcon/test
-        cp ${{ github.workspace }}/*.c   ${{ github.workspace }}/*.h   net/netlink/ipcon/
-        cp ${{ github.workspace }}/Kconfig ${{ github.workspace }}/Makefile net/netlink/ipcon/
-        cp ${{ github.workspace }}/test/kunit/*.c   net/netlink/ipcon/test/
-        cp ${{ github.workspace }}/test/kunit/Makefile net/netlink/ipcon/test/
-        cp ${{ github.workspace }}/test/kunit/Kconfig net/netlink/ipcon/test/
-
-        # Patch netlink Kconfig/Makefile
-        echo 'source "net/netlink/ipcon/Kconfig"' >> net/netlink/Kconfig
-        sed -i 's|obj-y\s*:=|obj-y := ipcon/|' net/netlink/Makefile
-
-        # Add test/ subdir to ipcon Makefile for KUnit
-        # Bypass Kconfig: always build driver + tests
-        echo 'obj-y += test/' >> net/netlink/ipcon/Makefile
-        # Force ipcon driver objects to build
-        sed -i 's/obj-\${CONFIG_IPCON}/obj-y/' net/netlink/ipcon/Makefile
-        sed -i 's/obj-\${CONFIG_DEBUG_FS}/obj-y/' net/netlink/ipcon/Makefile
+        # Copy KUnit test files + headers to lib/kunit/
+        cp ${{ github.workspace }}/test/kunit/*.c lib/kunit/
+        echo "obj-y += name_cache_test.o" >> lib/kunit/Makefile
+        echo "obj-y += ipcon_db_test.o" >> lib/kunit/Makefile
+        # Copy ipcon headers needed by tests
+        cp ${{ github.workspace }}/ipcon.h ${{ github.workspace }}/name_cache.h ${{ github.workspace }}/ipcon_db.h lib/kunit/
+        # Add kernel source root to include path
+        echo "ccflags-y += -I\$(srctree)" >> lib/kunit/Makefile
+        echo "ccflags-y += -I\$(srctree)/lib/kunit" >> lib/kunit/Makefile
 
         # Create KUnit config
         cat > .kunitconfig << 'KC'
         CONFIG_KUNIT=y
-        CONFIG_IPCON=y
-        CONFIG_DEBUG_FS=y
         KC
 
         # Run (retry with reduced parallelism on resource-constrained runners)
