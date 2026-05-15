@@ -2,65 +2,32 @@ name: Release
 
 on:
   push:
-    branches:
-      - master
-      - main
-    paths:
-      - 'Kconfig'
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
 
 jobs:
-  check-version:
+  create-release:
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.extract.outputs.version }}
-      should_release: ${{ steps.check.outputs.should_release }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Extract version
+      - name: Extract version from tag
         id: extract
         run: |
-          VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
-          VERSION="${VERSION#v}"
-          if [ "$VERSION" = "0.0.0" ]; then
-            COMMIT_COUNT=$(git rev-list --count HEAD)
-            VERSION="0.1.${COMMIT_COUNT}"
-          fi
+          VERSION="${GITHUB_REF_NAME#v}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Extracted version: ${VERSION}"
-
-      - name: Check if release needed
-        id: check
-        run: |
-          VERSION="${{ steps.extract.outputs.version }}"
-          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
-            echo "Tag v${VERSION} already exists, skipping release"
-            echo "should_release=false" >> $GITHUB_OUTPUT
-          else
-            echo "New version detected: v${VERSION}"
-            echo "should_release=true" >> $GITHUB_OUTPUT
-          fi
-
-  create-release:
-    needs: check-version
-    if: needs.check-version.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Generate changelog
         id: changelog
         run: |
-          VERSION="${{ needs.check-version.outputs.version }}"
+          VERSION="${{ steps.extract.outputs.version }}"
           PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
 
           if [ -z "$PREV_TAG" ]; then
@@ -92,7 +59,7 @@ jobs:
 
       - name: Create source tarball
         run: |
-          VERSION="${{ needs.check-version.outputs.version }}"
+          VERSION="${{ steps.extract.outputs.version }}"
           git archive --format=tar.gz \
             --prefix=ipcon-driver-${VERSION}/ \
             -o ipcon-driver-${VERSION}.tar.gz \
@@ -101,15 +68,12 @@ jobs:
 
       - name: Build validation (compile check)
         run: |
-          VERSION="${{ needs.check-version.outputs.version }}"
           KERNEL_VER="6.12"
-
           wget -q "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KERNEL_VER}.tar.xz"
           tar -xf "linux-${KERNEL_VER}.tar.xz"
           cd "linux-${KERNEL_VER}"
           make defconfig
           make modules_prepare
-
           cd ..
           python3 << 'PYEOF'
           lines = [
@@ -124,18 +88,17 @@ jobs:
           with open('Makefile', 'w') as f:
               f.write('\n'.join(lines) + '\n')
           PYEOF
-
           export KERNEL_BUILD_PATH=$(pwd)/linux-${KERNEL_VER}
           make V=1 && echo "✅ Build validation passed" || {
-            echo "⚠️ Build completed with warnings (expected for out-of-tree)"
-            [ -f ipcon.ko -o -f ipcon.o ] && echo "✅ Objects built" || exit 1
+            echo "⚠️ Build warnings expected (out-of-tree build)"
+            [ -f ipcon.o ] && echo "✅ Objects built" || exit 1
           }
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${{ needs.check-version.outputs.version }}"
+          VERSION="${{ steps.extract.outputs.version }}"
           gh release create "v${VERSION}" \
             --title "IPCON Driver v${VERSION}" \
             --notes-file changelog.md \
