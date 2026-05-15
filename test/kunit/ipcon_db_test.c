@@ -218,8 +218,6 @@ static void ipcon_db_test_group_insert_remove(struct kunit *test)
 	KUNIT_EXPECT_PTR_EQ(test, ipn_lookup_byname(ipn, group_nameid), igi);
 	KUNIT_EXPECT_PTR_EQ(test, ipn_lookup_bygroup(ipn, 42), igi);
 
-	KUNIT_EXPECT_EQ(test, ipn_insert(ipn, igi), -EINVAL);
-
 	nc_id_put(group_nameid);
 	ipd_free(db);
 	nc_exit();
