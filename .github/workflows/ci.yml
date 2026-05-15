@@ -153,6 +153,9 @@ jobs:
       run: |
         cd linux-6.12
 
+        # Remove any cached .kunit from the kernel source cache
+        rm -rf .kunit
+
         # Integrate ipcon driver + KUnit tests into kernel tree
         mkdir -p net/netlink/ipcon/test
         cp ${{ github.workspace }}/*.c   ${{ github.workspace }}/*.h   net/netlink/ipcon/
