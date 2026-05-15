@@ -168,6 +168,10 @@ jobs:
         echo 'source "net/netlink/ipcon/Kconfig"' >> net/netlink/Kconfig
         sed -i 's|obj-y\s*:=|obj-y := ipcon/|' net/netlink/Makefile
 
+        # Add test/ subdir to ipcon Makefile for KUnit
+        # The driver Makefile lists individual objects; add test/ directory
+        echo 'obj-\$(CONFIG_IPCON_KUNIT_TEST) += test/' >> net/netlink/ipcon/Makefile
+
         # Add test Kconfig to ipcon's Kconfig
         echo '' >> net/netlink/ipcon/Kconfig
         echo 'source "net/netlink/ipcon/test/Kconfig"' >> net/netlink/ipcon/Kconfig
