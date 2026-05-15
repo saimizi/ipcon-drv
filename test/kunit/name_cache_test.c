@@ -48,7 +48,7 @@ static void nc_test_add_lookup(struct kunit *test)
 	{
 		char buf[IPCON_MAX_NAME_LEN];
 		KUNIT_EXPECT_EQ(test, nc_getname(id, buf), 0);
-		KUNIT_EXPECT_STR_EQ(test, buf, "test_peer");
+		KUNIT_EXPECT_STREQ(test, buf, "test_peer");
 	}
 
 	nc_exit();
@@ -149,7 +149,7 @@ static void nc_test_refname_valid(struct kunit *test)
 	ref = nc_refname(id);
 	KUNIT_EXPECT_NOT_ERR_OR_NULL(test, ref);
 	if (ref)
-		KUNIT_EXPECT_STR_EQ(test, ref, "ref_test");
+		KUNIT_EXPECT_STREQ(test, ref, "ref_test");
 
 	nc_id_put(id);
 	nc_exit();
