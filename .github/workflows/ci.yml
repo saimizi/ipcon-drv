@@ -169,20 +169,15 @@ jobs:
         sed -i 's|obj-y\s*:=|obj-y := ipcon/|' net/netlink/Makefile
 
         # Add test/ subdir to ipcon Makefile for KUnit
-        # The driver Makefile lists individual objects; add test/ directory
-        echo 'obj-\$(CONFIG_IPCON_KUNIT_TEST) += test/' >> net/netlink/ipcon/Makefile
-
-        # Add test Kconfig to ipcon's Kconfig
-        echo '' >> net/netlink/ipcon/Kconfig
-        echo 'source "net/netlink/ipcon/test/Kconfig"' >> net/netlink/ipcon/Kconfig
+        # Bypass Kconfig: always build driver + tests
+        echo 'obj-y += test/' >> net/netlink/ipcon/Makefile
+        # Force ipcon driver objects to build
+        sed -i 's/obj-\${CONFIG_IPCON}/obj-y/' net/netlink/ipcon/Makefile
+        sed -i 's/obj-\${CONFIG_DEBUG_FS}/obj-y/' net/netlink/ipcon/Makefile
 
         # Create KUnit config
         cat > .kunitconfig << 'KC'
         CONFIG_KUNIT=y
-        CONFIG_KUNIT_ALL_TESTS=n
-        CONFIG_IPCON=y
-        CONFIG_IPCON_KUNIT_TEST=y
-        CONFIG_DEBUG_FS=y
         KC
 
         # Run (retry with reduced parallelism on resource-constrained runners)

@@ -1,16 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0
 #
-# Makefile for IPCON KUnit tests
+# Makefile for IPCON KUnit tests (CI out-of-tree build)
 #
-# When patching ipcon into the kernel source tree, add this to
-# drivers/net/ipcon/Makefile:
-#
-#   obj-$(CONFIG_IPCON_KUNIT_TEST) += test/kunit/
-#
-# For out-of-tree CI testing, see .github/workflows/
+# obj-y is used here because the CI bypasses Kconfig.
+# For in-tree builds, use: obj-$(CONFIG_IPCON_KUNIT_TEST)
 
-# Include paths for IPCON headers (parent directory since tests are in test/)
+obj-y += name_cache_test.o
+obj-y += ipcon_db_test.o
+
+# Include paths for IPCON headers
 ccflags-y += -I$(src)/..
-
-obj-$(CONFIG_IPCON_KUNIT_TEST) += name_cache_test.o
-obj-$(CONFIG_IPCON_KUNIT_TEST) += ipcon_db_test.o
